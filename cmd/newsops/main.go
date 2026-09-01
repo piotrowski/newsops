@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
+	"news-ops/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -152,6 +154,9 @@ func runCommand(ctx context.Context, fn Command, args []string) error {
 		return handleExitError(exitErr)
 	}
 	if err != nil {
+		if lockErr, ok := err.(*store.LockedError); ok {
+			return handleLockedError(lockErr)
+		}
 		return handleError(err)
 	}
 	return outputJSON(result)
@@ -166,6 +171,20 @@ func handleExitError(e *ExitError) error {
 		fmt.Fprintf(stderr, "error: %s — %s\n", e.Slug, e.Message)
 	}
 	return exitCodeError{code: e.Code}
+}
+// handleLockedError prints the locked envelope and returns an exit code.
+func handleLockedError(e *store.LockedError) error {
+	fields := map[string]any{
+		"pid":        e.PID,
+		"held_since": e.HeldSince.Format(time.RFC3339),
+	}
+	envelope := buildEnvelope("locked", e.Error(), fields)
+	if jsonOut {
+		fmt.Fprintln(os.Stdout, mustMarshal(envelope))
+	} else {
+		fmt.Fprintf(stderr, "error: locked — %s\n", e.Error())
+	}
+	return exitCodeError{code: 2}
 }
 
 // handleError formats plain errors into the standard envelope.
