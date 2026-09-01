@@ -1,0 +1,154 @@
+sources:
+  - name: hacker-news
+    tier: 1
+    url: https://hacker-news.firebaseio.com/v0/topstories.json
+  - name: techmeme
+    tier: 1
+    url: https://www.techmeme.com/feed.xml
+  - name: arxiv-cs-ai
+    tier: 1
+    url: http://export.arxiv.org/rss/cs.AI
+  - name: arxiv-cs-cl
+    tier: 1
+    url: http://export.arxiv.org/rss/cs.CL
+  - name: arxiv-cs-lg
+    tier: 1
+    url: http://export.arxiv.org/rss/cs.LG
+  - name: arxiv-cs-se
+    tier: 1
+    url: http://export.arxiv.org/rss/cs.SE
+  - name: arxiv-cs-cr
+    tier: 1
+    url: http://export.arxiv.org/rss/cs.CR
+  - name: the-register
+    tier: 2
+    url: https://www.theregister.com/rss.xml
+  - name: ars-technica
+    tier: 2
+    url: https://feeds.arstechnica.com/arstechnica/technology-lab
+  - name: techcrunch
+    tier: 2
+    url: https://techcrunch.com/feed/
+  - name: the-verge
+    tier: 2
+    url: https://www.theverge.com/rss/index.xml
+  - name: wired
+    tier: 2
+    url: https://www.wired.com/feed/rss
+  - name: reuters-tech
+    tier: 2
+    url: https://www.reutersagency.com/feed/?taxonomy=na_news_type&post_type=standard&tag=tech
+  - name: bloomberg-technology
+    tier: 2
+    url: https://feeds.bloomberg.com/technology/news/rss
+  - name: theinformation
+    tier: 2
+    url: https://www.theinformation.com/feed
+  - name: venturebeat
+    tier: 2
+    url: https://venturebeat.com/feed/
+  - name: engadget
+    tier: 2
+    url: https://www.engadget.com/rss.xml
+  - name: gizmodo
+    tier: 2
+    url: https://gizmodo.com/rss
+  - name: cnet
+    tier: 2
+    url: https://www.cnet.com/tech/rss.xml
+  - name: security-week
+    tier: 2
+    url: https://www.securityweek.com/feed/
+  - name: krebsonsecurity
+    tier: 2
+    url: https://krebsonsecurity.com/feed/
+  - name: thehackernews
+    tier: 2
+    url: https://feeds.feedburner.com/TheHackersNews
+  - name: darkreading
+    tier: 2
+    url: https://www.darkreading.com/rss.xml
+  - name: opensource-com
+    tier: 2
+    url: https://www.opensource.com/feed
+  - name: stack-overflow-blog
+    tier: 3
+    url: https://stackoverflow.blog/feed/
+  - name: infoq
+    tier: 3
+    url: https://www.infoq.com/feed/recent-articles/
+  - name: dzone
+    tier: 3
+    url: https://dzone.com/rss/homepage
+  - name: dev-to
+    tier: 3
+    url: https://dev.to/feed
+  - name: github-blog
+    tier: 2
+    url: https://github.blog/feed/
+  - name: cloudflare-blog
+    tier: 1
+    url: https://blog.cloudflare.com/rss/
+  - name: aws-news
+    tier: 1
+    url: https://aws.amazon.com/blogs/aws/feed/
+  - name: openai-blog
+    tier: 1
+    url: https://openai.com/blog/rss.xml
+  - name: anthropic-blog
+    tier: 1
+    url: https://www.anthropic.com/rss.xml
+  - name: google-ai
+    tier: 1
+    url: https://blog.google/technology/ai/rss/
+  - name: deepmind-blog
+    tier: 1
+    url: https://deepmind.google/blog/rss.xml
+  - name: research-google
+    tier: 2
+    url: https://research.google/pubs/rss/
+  - name: huggingface-blog
+    tier: 2
+    url: https://huggingface.co/blog/feed.xml
+  - name: postgresql-news
+    tier: 2
+    url: https://blog.postgresql.org/feeds/posts/default
+  - name: golang-blog
+    tier: 1
+    url: https://go.dev/blog/feed.xml
+  - name: rust-blog
+    tier: 2
+    url: https://blog.rust-lang.org/feed.xml
+  - name: python-news
+    tier: 2
+    url: https://feeds.feedburner.com/PythonInsider
+  - name: kubernetes-blog
+    tier: 2
+    url: https://kubernetes.io/blog/feed.xml
+  - name: meta-engineering
+    tier: 3
+    url: https://engineering.fb.com/feed/
+  - name: netflix-eng
+    tier: 3
+    url: https://netflixtechblog.com/feed
+  - name: stripe-blog
+    tier: 2
+    url: https://stripe.com/blog/rss.xml
+  - name: discord-engineering
+    tier: 3
+    url: https://discord.com/blog/category/engineering/feed
+  - name: shopify-engineering
+    tier: 3
+    url: https://shopify.engineering/feed
+  - name: google-project-zero
+    tier: 2
+    url: https://googleprojectzero.blogspot.com/feeds/posts/default
+  - name: queue-acm
+    tier: 3
+    url: https://queue.acm.org/rss.xml
+  - name: linux-kernel
+    tier: 2
+    url: https://www.kernel.org/feed.xml
+  - name: lwn-news
+    tier: 2
+    url: https://lwn.net/headlines/newrss

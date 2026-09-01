@@ -1,0 +1,5 @@
+candidate_limit: 40
+per_source_cap: 3
+title_simhash_max: 3
+max_backfill_days: 30
+exclude_terms: []

@@ -1,0 +1,25 @@
+primary_domains:
+  - arxiv.org
+  - blog.cloudflare.com
+  - aws.amazon.com
+  - github.blog
+  - openai.com
+  - anthropic.com
+  - deepmind.google
+  - research.google
+  - huggingface.co
+  - postgresql.org
+  - kernel.org
+  - lwn.net
+  - golang.org
+  - go.dev
+  - rust-lang.org
+  - python.org
+  - kubernetes.io
+  - engineering.fb.com
+  - netflixtechblog.com
+  - stripe.com
+  - discord.com
+  - shopify.engineering
+  - googleprojectzero.blogspot.com
+  - queue.acm.org

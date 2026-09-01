@@ -1,0 +1,4 @@
+sources:
+  - name: hacker-news
+    tier: 0
+    url: https://hacker-news.firebaseio.com/v0/topstories.json
