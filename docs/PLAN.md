@@ -1,60 +1,134 @@
-# news-ops implementation plan (v3)
+# news-ops implementation plan (v4)
 
 ## Context
 
-Build a personal IT-news pipeline in Go: fetch RSS feeds, deduplicate,
-score against current interests, and produce `digest.md`. A separate
-interactive mode (`deep`) queries the archive via LLM.
+news-ops is an **agentic workflow**. An AI agent running in a harness
+(Claude Code, Pi, or similar) sits on this repo, calls a small Go CLI to
+collect and narrow the news, judges what is interesting, researches the ones
+you pick, and drafts a LinkedIn or blog post in your voice.
 
-Two loops — batch (deterministic, no LLM) and interactive (on-demand, LLM).
-Single binary with subcommands. **Local only, no server, no cron** — the
-agent triggers collection when needed.
+The CLI does the things a language model is bad at: HTTP concurrency, feed
+parsing, deduplication, and remembering everything you've ever seen. The
+agent does the thing it is good at: judgment, research, and writing. Neither
+half tries to do the other's job.
 
-This document is self-contained. It replaces the earlier design document,
-which has been deleted; everything still needed from it is inlined here.
+**Collection happens only when the agent is invoked.** No server, no cron, no
+background process. You open a session, the agent collects if the data is
+stale, and everything downstream happens in that conversation.
+
+### The loop
+
+```
+newsops collect          →  ~40 candidates, deterministic, no LLM
+    ↓  agent skims titles + excerpts
+digest.md                →  one line per candidate, ranked, with a reason
+    ↓  YOU pick which are worth researching
+briefs/<id>-<slug>.md    →  agent reads the article, queries the archive
+    ↓  YOU pick at most one worth writing about
+posts/<date>-<slug>.md   →  draft in your voice, LinkedIn or blog
+    ↓  YOU edit and publish by hand
+```
+
+Two human gates, deliberately. The first stops the agent burning tokens
+researching things you don't care about. The second is the one that matters:
+it keeps you deciding what you put your name on.
+
+### What changed from v3
+
+v3 was a deterministic pipeline with an agent bolted on the end. v4 inverts
+that. The consequences are large and mostly subtractive:
+
+| Change | Reason |
+|---|---|
+| **Embeddings removed entirely** | Interest scoring was ~3 of 7 build steps, an API key, a vector cache, and a two-week calibration period — to approximate a judgment the agent makes for free while reading the list anyway |
+| **Weighted score formula removed** | Same reason. `weights.yml` shrinks to a handful of prefilter knobs |
+| **Digest is written by the agent, not the CLI** | The CLI emits `candidates --json`; the agent ranks, annotates, and writes `digest.md` |
+| **Novelty via full-text archive query, not cosine** | `newsops query` over FTS5 answers "have we covered this vendor before" well enough, with no vectors |
+| **Drafting is now in scope** | v1–v3 said brief-not-draft. Reversed by decision: the agent drafts, gated behind an explicit human pick, in a voice derived from your own posts |
+| **Voice capture added** | `context/voice/` samples plus a derived style guide |
+| **Window is "since last fetch", not 24h** | Collection is invocation-triggered; a fixed window silently loses a week if you skip a week |
+
+Kept from v3 unchanged: the store and run-bookkeeping design, the lock file,
+`--json` everywhere, the `status` contract, the two-layer dedupe, story ID
+permanence, and the source list.
 
 ### Non-goals
 
-- **No auto-publishing.** The system produces a brief. You write the post.
-- **No agent in the batch loop.** Ingestion through digest is deterministic.
-- **No scraping of hostile sources.** LinkedIn and similar block scrapers and
-  forbid it in their terms.
-- **No stored article bodies beyond what's needed.** Summaries are written
-  from scratch; source paragraphs are never reproduced.
+- **No auto-publishing.** Drafts land on disk. You copy, edit, and post. No
+  LinkedIn credentials in this repo.
+- **No server, no cron, no daemon.**
+- **No scraping of hostile sources.** LinkedIn, Indeed and similar block
+  scrapers and forbid it in their terms.
+- **No stored article bodies beyond an excerpt.** Briefs and posts are
+  written from scratch; source paragraphs are never reproduced.
+- **No agent in the collection loop.** `fetch` → `dedupe` → `candidates` is
+  deterministic and reproducible. The agent starts where judgment starts.
 
-### Changes from v1
+---
 
-| # | Change | Reason |
+## Architecture
+
+### Division of labour
+
+| Concern | Owner | Why |
 |---|---|---|
-| 1 | No cron. Agent-triggered via `status` + `--max-age` guard | Local setup; agent must cheaply decide whether data is stale |
-| 2 | Embed title + ~1500 chars, not first paragraph | Free win; 32k token budget was being wasted. Summarize-then-embed deferred, see Assumptions |
-| 3 | Dedupe demoted to 3 cheap layers; embedding clustering deferred | Source list is mostly primary sources; aggregators dedupe exactly via canonical URL |
-| 4 | Dedupe now precedes embedding | Layers 1–2 need no vectors, and collapsing duplicates first means fewer items to embed |
-| 5 | Embed canonical items only, one vector per story | That is exactly what interest and novelty consume |
-| 6 | Interest and novelty normalized per run before weighting | Raw cosines occupy a narrow band; unnormalized, the yaml weights are fiction |
+| Fetch, parse, cache feeds | CLI | Concurrency, ETag handling, format zoo |
+| Deduplicate | CLI | Pure string functions, must be deterministic |
+| Narrow ~300 items → ~40 candidates | CLI | Volume control, no judgment required |
+| Rank and annotate candidates | Agent | Judgment |
+| Research a story | Agent | Reading, link-following, archive queries |
+| Write the draft | Agent | Writing |
+| Remember everything | CLI + SQLite | The archive query is the capability a chat window lacks |
+| Decide what gets briefed, what gets written, what gets published | **You** | The whole point |
 
-**Consequence of #3:** embeddings are still required — interest scoring and
-novelty need them regardless. Only the *dedupe* use of embeddings is deferred.
+### Repository layout
+
+```
+news-ops/
+├── AGENTS.md                # canonical agent instructions (harness-neutral)
+├── CLAUDE.md                # two lines: @AGENTS.md
+├── modes/
+│   ├── _shared.md           # loaded by every mode; non-negotiables
+│   ├── collect.md           # collect → skim → write digest.md
+│   ├── brief.md             # research one story → briefs/
+│   ├── draft.md             # brief → post draft in your voice
+│   └── voice.md             # regenerate the style guide from samples
+├── config/
+│   ├── sources.yml          # feeds
+│   ├── domains.yml          # primary-source domains
+│   └── prefilter.yml        # the few numbers the CLI needs
+├── context/
+│   ├── interests.md         # dated sections; what you care about now
+│   ├── beats.md             # standing topics, and topics to avoid
+│   ├── voice/               # ~10 of your own posts, one file each
+│   └── voice-guide.md       # derived style guide (generated, editable)
+├── cmd/newsops/main.go
+├── internal/{feed,store,dedupe,candidates,runstate}/
+├── data/                    # news.db, news.lock, cache/   (gitignored)
+├── digest.md                # current digest (agent-written)
+├── briefs/                  # (gitignored)
+└── posts/                   # (gitignored)
+```
+
+`.claude/commands/` may hold thin slash-command shortcuts, but they contain
+no behavior — each is a one-liner pointing at a mode file. Everything real
+lives in harness-neutral markdown so moving to Pi is a no-op.
 
 ---
 
 ## Approach
 
-Steps are numbered in build order. The system is useful before it is
-complete: after step 5 you have a working digest with no LLM anywhere.
+Numbered in build order. After step 4 the CLI is complete and you could drive
+it by hand; after step 5 the daily loop works; step 6 adds drafting.
 
-### Step 1: Project scaffold, store module, config
+### Step 1: Scaffold, store, config
 
-**Goal:** Go module, directory layout, SQLite schema with migrations, CRUD
-for `items`, run bookkeeping, and the config files.
+**Goal:** Go module, SQLite schema with migrations, run bookkeeping, config
+loading.
 
-- Initialize Go module (`news-ops`) at repo root.
-- Directory tree: `cmd/newsops/`, `internal/feed/`, `internal/store/`,
-  `internal/embed/`, `internal/dedupe/`, `internal/score/`,
-  `internal/digest/`, `internal/runstate/`, `config/`, `context/`,
-  `modes/`. Gitignored: `data/`, `briefs/`, `posts/`, `digest/`.
-- `internal/store/schema.go` — SQLite via `modernc.org/sqlite` (pure Go,
-  no cgo):
+- Go module `news-ops` at repo root. Directory tree as above.
+- `internal/store/schema.go` — SQLite via `modernc.org/sqlite` (pure Go, no
+  cgo):
 
 ```sql
 CREATE TABLE items (
@@ -62,23 +136,56 @@ CREATE TABLE items (
     url           TEXT NOT NULL UNIQUE,        -- as published
     canonical_url TEXT NOT NULL,               -- normalized, see step 3
     title         TEXT NOT NULL,
-    source        TEXT NOT NULL,
+    source        TEXT NOT NULL,               -- name from sources.yml
+    tier          INTEGER NOT NULL,
     published_at  DATETIME,
     first_seen    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     body_hash     TEXT NOT NULL,
-    body_excerpt  TEXT,                        -- ~1500 chars, embedding input
+    body_excerpt  TEXT,                        -- ~1500 chars, what the agent skims
     raw_path      TEXT,
     story_id      INTEGER                      -- FK stories(id), null until dedupe
 );
-CREATE INDEX idx_items_published     ON items(published_at);
 CREATE INDEX idx_items_first_seen    ON items(first_seen);
 CREATE INDEX idx_items_canonical_url ON items(canonical_url);
 CREATE INDEX idx_items_story         ON items(story_id);
 
--- run bookkeeping: replaces cron's implicit "when did this last run"
+CREATE TABLE stories (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    canonical_item_id INTEGER NOT NULL,
+    source_count      INTEGER NOT NULL DEFAULT 1,
+    method            TEXT NOT NULL,           -- url|title
+    first_seen        DATETIME NOT NULL,
+    last_seen         DATETIME NOT NULL,
+    shown_at          DATETIME,                -- appeared in a digest; prevents repeats
+    FOREIGN KEY(canonical_item_id) REFERENCES items(id)
+);
+CREATE INDEX idx_stories_last_seen ON stories(last_seen);
+CREATE INDEX idx_stories_shown     ON stories(shown_at);
+
+-- extra sources on a story (the HN thread, the second outlet)
+CREATE TABLE story_sources (
+    story_id  INTEGER NOT NULL,
+    source    TEXT NOT NULL,
+    url       TEXT NOT NULL,
+    kind      TEXT NOT NULL,                   -- article|discussion
+    PRIMARY KEY(story_id, url),
+    FOREIGN KEY(story_id) REFERENCES stories(id)
+);
+
+-- your decisions: the record of what you actually cared about
+CREATE TABLE decisions (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    story_id INTEGER NOT NULL,
+    action   TEXT NOT NULL CHECK(action IN ('shown','briefed','drafted','posted','dismissed')),
+    note     TEXT,
+    at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(story_id) REFERENCES stories(id)
+);
+CREATE INDEX idx_decisions_story ON decisions(story_id, at);
+
 CREATE TABLE runs (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    stage      TEXT NOT NULL,       -- fetch|dedupe|embed|score|digest
+    stage      TEXT NOT NULL,                  -- fetch|dedupe|candidates
     started_at DATETIME NOT NULL,
     ended_at   DATETIME,
     ok         BOOLEAN,
@@ -88,37 +195,56 @@ CREATE TABLE runs (
 );
 CREATE INDEX idx_runs_stage ON runs(stage, started_at);
 
+-- HTTP conditional-request state, one row per source: what makes a
+-- re-fetch of an unchanged feed cost one round trip and no parsing.
+CREATE TABLE feed_state (
+    source        TEXT PRIMARY KEY,           -- name from sources.yml
+    url           TEXT NOT NULL,
+    etag          TEXT,
+    last_modified TEXT,
+    last_fetched  DATETIME,
+    last_status   INTEGER,
+    last_error    TEXT
+);
+
 CREATE TABLE schema_version (
     version    INTEGER PRIMARY KEY,
     applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- the archive query that justifies the agent
+CREATE VIRTUAL TABLE items_fts USING fts5(
+    title, body_excerpt, content='items', content_rowid='id'
+);
 ```
 
-**Migrations, not just creation.** The plan already schedules two schema
-additions (dedupe layer 3's merge bookkeeping, and `embeddings.kind =
-'summary'`). An ordered `[]migration{version, sql}` slice applied inside a
-transaction on open is twenty lines now and saves a hand-edited archive later.
+`decisions` is a log, not a single row per story — a story can be shown on
+Monday, briefed on Tuesday, and drafted on Wednesday, and the sequence is the
+interesting part. It is also the table people skip; it costs nothing now and
+is the only record of whether the agent's picks match yours.
 
-- `internal/store/db.go` — open/close, transaction helpers, WAL mode, and
-  the process lock (see below).
-- `internal/store/items.go` — `InsertItem`, `GetItemsByDateRange`,
-  `CountItemsInWindow`, `GetItemsByCanonicalURL`.
+**Migrations, not just creation.** An ordered `[]migration{version, sql}`
+slice applied in a transaction on open. Twenty lines now, and the alternative
+is hand-editing a real archive later.
+
+- `internal/store/db.go` — open/close, WAL, transaction helpers, FTS triggers,
+  and the process lock.
 - `internal/runstate/` — `Begin(stage)`, `End(stage, ok, counts)`,
-  `LastSuccess(stage) (time.Time, bool)`. Every subcommand wraps itself in
-  these. The bool is false when the stage has never succeeded.
+  `LastSuccess(stage) (time.Time, bool)`. The bool is false when a stage has
+  never succeeded.
 
 **Process lock.** Lock `data/news.lock`, **not** `data/news.db` — SQLite
 manages its own locking on the database file, and an advisory lock on top of
-it is at best redundant and at worst interacts badly with WAL. Non-blocking:
+it is redundant at best and interacts badly with WAL at worst. Non-blocking:
 a second process exits 2 immediately with
-`{"error": "locked", "held_since": "2026-08-30T09:14:02Z"}`. Blocking would
-mean an agent invocation can hang indefinitely, which is exactly what the
-`status`-first protocol exists to avoid.
+`{"error": "locked", "held_since": "..."}`. Blocking would let an agent
+invocation hang, which is the one failure mode a conversational tool must not
+have.
 
-**`config/sources.yml`** — the full list. Tier maps to the `source_tier`
-weight: **1** = primary or high signal-to-noise · **2** = solid reporting ·
-**3** = volume, useful mainly for the coverage-breadth signal. Weighted
-toward backend / infra / AI.
+**`config/sources.yml`** — the full list. Tier is a coarse quality hint the
+prefilter uses for ordering and the agent sees in the candidate list.
+**1** = primary or high signal-to-noise · **2** = solid reporting ·
+**3** = volume.
 
 ```yaml
 sources:
@@ -189,537 +315,433 @@ sources:
 ```
 
 **These URLs are unverified — feed paths drift.** Expect the first
-`sources:check` run to fail several and need a round of fixes; that is the
-point of writing that subcommand early, not a sign something is broken.
+`sources:check` to fail several. That is why it is the first thing built after
+fetch, not a sign anything is wrong.
 
-- `config/domains.yml` — primary-source domains, used by the
-  `primary_source` score component and by `deep`'s link-following filter.
-- `config/weights.yml` — every tunable number (contents in step 5).
+- `config/domains.yml` — primary-source domains. Used by canonical-item
+  selection and as the allowlist for the agent's link-following during briefs.
+- `config/prefilter.yml` — the only tunable numbers left:
 
-**Tests:** in-memory SQLite. Round-trip each CRUD function; assert the `url`
-UNIQUE constraint rejects a duplicate; assert migrations are idempotent when
-applied twice.
+```yaml
+candidate_limit:      40   # how many the agent skims
+per_source_cap:        3   # stops arXiv and TechCrunch owning the list
+title_simhash_max:     3
+max_backfill_days:    30   # first run, or after a long gap
+exclude_terms: []          # hard drops, e.g. ["horoscope"]
+```
 
-### Step 2: Feed module + agent-facing CLI surface
+No interest weights here. Interest lives in `context/interests.md` as prose,
+which the agent reads. A paragraph gets rewritten in thirty seconds; a
+weight never gets retuned.
 
-**Goal:** Concurrent fetch, plus the ergonomics that let an agent drive this
-safely without cron.
+**Tests:** in-memory SQLite. CRUD round-trips, the `url` UNIQUE constraint,
+migrations idempotent when applied twice, FTS triggers keeping `items_fts` in
+sync on insert and update.
 
-- `internal/feed/parser.go` — wrapper around `mmcdole/gofeed`. Extract
-  title, link, published date, content, **and feed categories/tags** (they
-  feed the embedding, see step 4).
+### Step 2: Feed module + fetch
+
+**Goal:** Concurrent, polite, cacheable collection.
+
+- `internal/feed/parser.go` — wrapper around `mmcdole/gofeed`. Extract title,
+  link, published date, content, and feed categories/tags. Build
+  `body_excerpt` as `title + "\n" + tags + "\n" + content[:1500]`, stripped of
+  markup — this is what the agent skims, so it must be readable prose, not
+  raw HTML.
 - `internal/feed/fetcher.go` — `errgroup` with `SetLimit(10)`, per-host
   limiter, `ETag` / `If-Modified-Since` (304 = skip). **Send a descriptive
-  `User-Agent`** (e.g. `newsops/0.1 (+personal feed reader)`) — Reddit and
-  several CDNs 429 the default Go agent.
-- `internal/feed/cache.go` — raw body to `data/cache/<url_hash>/<date>`. You
-  will reprocess many times while tuning, and refetching is slow, rude, and
-  gets you blocked.
-- Fall back to `go-shiori/go-readability` extraction only when a feed returns
-  a truncated summary.
-- `cmd/newsops/main.go` — subcommand routing:
-  `status`, `sources:check`, `fetch`, `dedupe`, `embed`, `score`,
-  `digest`, `run`.
+  `User-Agent`** (`newsops/0.1 (+personal feed reader)`) — Reddit and several
+  CDNs 429 the default Go agent.
+- `internal/feed/cache.go` — raw bodies to `data/cache/<url_hash>/<date>`.
+  You will reprocess many times while tuning, and refetching is slow, rude,
+  and gets you blocked.
+- `go-shiori/go-readability` as a fallback only, when a feed returns a
+  truncated summary and the excerpt would otherwise be useless.
 
-**Agent-facing requirements — these are the point of this step:**
+**Window.** `fetch` collects everything new since the last successful fetch.
+On a first run, or after a gap longer than `max_backfill_days`, it reaches
+back that far and no further. This is the difference between a tool that
+works when you use it twice a week and one that only works if you use it
+daily.
 
-- **`--json` on every subcommand.** The agent parses stdout; human-formatted
-  output is a bug generator. Human-readable is the fallback, not the
-  default contract.
-- **`newsops status --json`** — read-only, no network, fast. Returns per
-  stage: last success, age in minutes, item counts, whether stale. This is
-  the first call the agent makes, every time.
+**`newsops sources:check`** — GET each source, confirm 200 and that `gofeed`
+parses ≥1 item. Pass/fail table, no side effects. Run before the first real
+fetch, and monthly.
 
-```json
-{
-  "stages": {
-    "fetch":  {"last_success": "2026-08-30T07:12:00Z", "age_min": 143, "stale": false},
-    "dedupe": {"last_success": "2026-08-30T07:13:00Z", "age_min": 142, "stale": false},
-    "score":  {"last_success": "2026-08-29T07:15:00Z", "age_min": 1582, "stale": true}
-  },
-  "counts": {"items_total": 4102, "items_24h": 287, "stories_24h": 231},
-  "digest": {"path": "digest.md", "generated_at": "2026-08-29T07:15:00Z"}
-}
-```
+**Tests:** `httptest` servers over saved fixture bodies — one RSS, one Atom,
+one truncated-summary feed. Assert category extraction, that a 304 yields
+zero items and no error, and that the per-host limiter serializes two URLs on
+one host.
 
-**Never-run contract.** On a virgin database `status` must still return the
-same shape — `stale` is a boolean, not an error or a missing key. Never-run
-is stale:
+### Step 3: Dedupe — two layers, cheapest first
 
-```json
-{
-  "stages": {
-    "fetch":  {"last_success": null, "age_min": null, "stale": true},
-    "dedupe": {"last_success": null, "age_min": null, "stale": true},
-    "embed":  {"last_success": null, "age_min": null, "stale": true},
-    "score":  {"last_success": null, "age_min": null, "stale": true},
-    "digest": {"last_success": null, "age_min": null, "stale": true}
-  },
-  "counts": {"items_total": 0, "items_24h": 0, "stories_24h": 0},
-  "digest": {"path": "digest.md", "generated_at": null}
-}
-```
+**Goal:** One story per actual story, with the aggregators folded in.
 
-**`--max-age` guard on every stage.** `newsops fetch --max-age 6h` no-ops if
-the last successful fetch is younger, exiting 0 with
-`{"skipped": true, "reason": "fresh"}`. This makes "just run it" safe — the
-agent never has to reason about whether it already ran.
+The source list is dominated by primary sources — vendor engineering blogs,
+arXiv, personal blogs — which don't republish each other. Genuine cross-outlet
+duplication is confined to maybe 12 of the 50 sources. And for aggregators,
+semantic similarity is the wrong tool entirely: HN, Lobsters, Reddit and
+Techmeme all link to the original, so canonicalizing the outbound URL dedupes
+them *exactly*.
 
-**But age alone is not sufficient.** Consider the `status` example above:
-fetch is fresh at 143 minutes, score is stale at 1582. Under a strict
-age-only rule a fetch that just landed 300 items would be followed by a
-`score` that skips itself as fresh, and those items would never reach a
-digest. So:
-
-> **A stage runs if its last success is older than `--max-age`, OR it has
-> pending input.**
-
-| Stage | Pending input |
-|---|---|
-| `fetch` | (age only — it is the network stage; nothing upstream of it) |
-| `dedupe` | any item with `story_id IS NULL` |
-| `embed` | any canonical item with no `embeddings` row for the current model |
-| `score` | any candidate story with no `scores` row, or whose `interest_version` differs from the current one |
-| `digest` | any `scores` row written since the last successful digest |
-
-Skipping stays cheap and safe, and a fresh fetch never strands new items.
-
-- **`newsops run --max-age 6h`** — chains fetch → dedupe → embed → score →
-  digest, each honouring the guard above.
-- **Exit codes:** 0 success or skipped, 1 partial (some feeds failed, digest
-  still produced), 2 hard failure. **`run` continues past a stage that exits
-  1** — the whole point of code 1 is that a digest is still worth producing —
-  and **aborts on 2**. `run` returns the worst code any stage returned.
-
-- **`sources:check`** — GET each source, confirm 200 and that `gofeed`
-  parses ≥1 item. Print a pass/fail table. No side effects. Run before
-  first real fetch and monthly after.
-
-**Tests:** `httptest` servers serving saved fixture bodies (one RSS, one
-Atom, one truncated-summary feed). Assert the parser extracts categories;
-assert a 304 response results in zero new items and no error; assert the
-per-host limiter serializes two URLs on the same host.
-
-### Step 3: Dedupe module — three layers, cheapest first
-
-**Goal:** Collapse the same story appearing more than once. **Layers 1 and 2
-only.** Layer 3 is deferred and may never be needed.
-
-Rationale for the demotion: the source list is dominated by primary sources
-— vendor engineering blogs, arXiv, personal blogs — which don't republish
-each other. Genuine cross-outlet duplication is confined to roughly 12 of
-the 50 sources. And for aggregators, semantic similarity is the *wrong
-tool*: HN, Lobsters, Reddit, and Techmeme all link to the original, so
-canonicalizing the outbound URL dedupes them **exactly**.
-
-Terminology change from v1: `clusters` → `stories`, `cluster_size` →
-`source_count`. The old name implied an algorithm that is no longer the
-primary mechanism.
-
-```sql
-CREATE TABLE stories (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    canonical_item_id INTEGER NOT NULL,
-    source_count      INTEGER NOT NULL DEFAULT 1,
-    method            TEXT NOT NULL,   -- url|title|embedding
-    first_seen        DATETIME NOT NULL,
-    last_seen         DATETIME NOT NULL,
-    FOREIGN KEY(canonical_item_id) REFERENCES items(id)
-);
-CREATE INDEX idx_stories_last_seen ON stories(last_seen);
-```
-
-**Story IDs are permanent.** `digest.md` numbers stories by ID,
-`decisions.story_id` is the entire feedback loop, and `deep` writes
-`briefs/<story_id>.md`. If a dedupe re-run ever renumbers, every brief and
-every recorded decision silently points at a different story — and nothing
-will tell you. So the invariant, stated up front:
+**Story IDs are permanent.** `digest.md` numbers stories by ID, briefs are
+`briefs/<story_id>-<slug>.md`, and `decisions.story_id` is the only record of
+what you cared about. If a dedupe re-run renumbered, every one of those would
+silently point somewhere else, and nothing would tell you. So:
 
 > Dedupe is incremental and append-only over `stories`. An existing row may
-> have its `source_count`, `last_seen`, and `canonical_item_id` updated. A
-> story ID is never reused and never renumbered. If two existing stories must
-> merge (only possible once layer 3 lands), the **older** ID survives and the
-> merge is recorded so old references can be followed.
+> have `source_count`, `last_seen` and `canonical_item_id` updated. A story ID
+> is never reused and never renumbered.
 
 **Layer 1 — URL canonicalization (`internal/dedupe/canonical.go`).**
-Free, exact, catches the largest share.
 
-- Strip `utm_*`, `ref`, `source`, `fbclid`, fragments.
+- Strip `utm_*`, `ref`, `source`, `fbclid`, and fragments.
 - Lowercase host, strip `www.`, strip trailing slash.
 - Follow one redirect hop for known shorteners.
-- **Resolve aggregator links to their target.** An aggregator item carries
-  the real URL in the feed; use it as the item's `canonical_url`, and record
-  the aggregator as an additional source on the same story rather than as a
-  separate item. Which field holds what differs per aggregator:
+- **Resolve aggregator links to their target.** The aggregator item carries
+  the real URL; use it as `canonical_url` and record the aggregator in
+  `story_sources` as an extra source, not a separate item:
 
-| Source | Outbound (article) URL | Discussion URL |
+| Source | Article URL | Discussion URL |
 |---|---|---|
 | Hacker News (`hnrss`) | `<link>` | `<comments>` |
 | Lobsters | `<link>` | `<comments>` |
-| Reddit (`.rss`) | first outbound `<a>` in `content` (self-posts have none — treat as their own item) | `<link>` |
-| Techmeme | `<link>` (already the source article) | — |
+| Reddit (`.rss`) | first outbound `<a>` in content | `<link>` |
+| Techmeme | `<link>` (already the source) | — |
 
-The discussion URL is stored on the story as an extra source, never as an
-item of its own. A self-post or Ask HN with no outbound link is a normal item.
+A self-post or Ask HN with no outbound link is a normal item of its own.
 
 **Layer 2 — normalized title similarity (`internal/dedupe/title.go`).**
-Free, catches most rewrites.
 
 - Normalize: lowercase, strip punctuation, drop outlet suffixes
-  (`" | Ars Technica"`), drop leading `"Show HN: "` etc.
-- SimHash with Hamming distance ≤ 3, or token Jaccard ≥ 0.6.
+  (`" | Ars Technica"`), drop leading `"Show HN: "`.
+- SimHash, Hamming distance ≤ `title_simhash_max`.
 - Compare only within a 48h window.
 
-**Layer 3 — embedding cosine. DEFERRED. Do not build in this pass.**
-Trigger to build it: after two weeks of real digests, count duplicate
-stories that survived layers 1–2. If that's under ~5% of digest slots, this
-layer is never written. The interface is designed so it can slot in as a
-third pass over the survivors without touching layers 1–2.
+Canonical item selection: earliest `published_at`, preferring a
+`domains.yml` primary-source domain when tied.
 
-- `internal/dedupe/assign.go` — run layers in order, assign `story_id`,
-  update `stories`. Canonical item selection: earliest `published_at`,
-  preferring a `domains.yml` primary-source domain when tied.
+**A third semantic layer is not planned.** If, after a few weeks, duplicates
+are visibly leaking into digests, the cheapest fix is to let the agent merge
+them while skimming — it is already reading all 40 titles — and record the
+merge. That costs nothing and needs no embedding infrastructure.
 
-**Tests:** table tests for `canonical.go` and `title.go`. These are pure
-functions over strings and are the highest-value tests in the project — every
-downstream number depends on them, and their failures are silent. Cover the
-tracking-param cases, the aggregator mappings above, outlet-suffix stripping,
-and a pair of real headlines that should and should not match.
+**Tests:** table tests for both files. These are pure string functions, every
+downstream number depends on them, and their failures are silent — they are
+the highest-value tests in the project. Cover tracking params, each aggregator
+mapping above, outlet-suffix stripping, and a real headline pair that should
+match plus one that should not.
 
-### Step 4: Embed module + content-hash cache
+### Step 4: The agent-facing CLI surface
 
-**Goal:** One vector per **story**, cached by content hash.
+**Goal:** Everything the agent needs, as JSON, with no judgment in it.
 
-**Scope: canonical items only.** Dedupe runs first, so embedding every item
-would pay for near-duplicates and produce vectors nothing reads — interest
-and novelty both consume the story's canonical vector. Cost of this choice:
-if dedupe layer 3 is ever built, it needs a back-fill pass over the
-non-canonical items first. That is a real part of the price of deferring
-layer 3, and it is worth paying.
+`cmd/newsops/main.go` routes: `status`, `sources:check`, `fetch`, `dedupe`,
+`candidates`, `collect`, `query`, `decide`, `show`.
 
-**Embedding input:**
+**`--json` on every subcommand.** The agent parses stdout; human-formatted
+output is a bug generator. Human-readable is the fallback, not the contract.
 
-```
-title + "\n" + categories/tags (if any) + "\n" + body_excerpt[:1500]
-```
+**`newsops status --json`** — read-only, no network, fast. First call of every
+session.
 
-Not the first paragraph. Voyage 3 accepts 32k tokens; restricting to a lede
-threw away context for nothing. 1500 characters covers the substance of
-almost every news item and blog post opener without pulling in navigation
-boilerplate.
-
-- `internal/embed/client.go` — HTTP client for Voyage (default, 1024d) via
-  `EMBEDDING_API_KEY` / `EMBEDDING_MODEL`. OpenAI `text-embedding-3-small`
-  as a drop-in fallback. **Confirm the current model id, dimension, and
-  pricing against the provider's docs at implementation time** — do not
-  trust the values in this plan. Voyage takes an `input_type`: send
-  `document` for items and `query` for the interests paragraph.
-- `internal/embed/hash.go` — SHA-256 of the exact embedding input string.
-  Cache key. Never re-embed identical content.
-- `internal/embed/store.go`:
-
-```sql
-CREATE TABLE embeddings (
-    item_id    INTEGER PRIMARY KEY,
-    vec        BLOB NOT NULL,     -- little-endian float32[]
-    model      TEXT NOT NULL,
-    dim        INTEGER NOT NULL,
-    input_hash TEXT NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(item_id) REFERENCES items(id)
-);
-CREATE INDEX idx_embeddings_input_hash ON embeddings(input_hash);
+```json
+{
+  "stages": {
+    "fetch":      {"last_success": "2026-08-30T07:12:00Z", "age_min": 143, "stale": false},
+    "dedupe":     {"last_success": "2026-08-30T07:13:00Z", "age_min": 142, "stale": false},
+    "candidates": {"last_success": "2026-08-30T07:13:00Z", "age_min": 142, "stale": false}
+  },
+  "counts": {"items_total": 4102, "new_since_fetch": 0, "unshown_stories": 12},
+  "digest": {"path": "digest.md", "generated_at": "2026-08-30T07:20:00Z"}
+}
 ```
 
-- `internal/embed/embed.go` — `EmbedItem(ctx, item)`: check `input_hash`,
-  call API on miss, serialize `[]float32` via `encoding/binary`.
-- **Batch the API calls.** Voyage and OpenAI both accept arrays; one
-  request per 100 items, not per item.
+On a virgin database the shape is identical, with `last_success: null`,
+`age_min: null`, `stale: true`. **Never-run is stale**, and `stale` is always
+a boolean — never a missing key, never an error. An agent that has to
+special-case a first run will get it wrong.
 
-**No vector database.** Novelty compares against 30 days (~10k vectors). At
-1024 dimensions that is ~10M multiplies — low single-digit milliseconds,
-trivially parallel across goroutines. A vector store buys nothing and costs
-cgo, extension loading, and a class of deployment problems.
+**`newsops collect --max-age 6h --json`** — the agent's one command. Chains
+fetch → dedupe → candidates. `--max-age` no-ops the fetch if the last
+successful one is younger, exiting 0 with
+`{"skipped": true, "reason": "fresh"}`, but dedupe and candidates still run if
+they have pending input (items with `story_id IS NULL`, or unshown stories).
+A fresh fetch must never strand new items.
 
-**Tests:** a fake HTTP embedding server. Assert batching (101 items → 2
-requests); assert an identical input string on a second run issues zero
-requests; assert float32 round-trips through the BLOB unchanged.
+**`newsops candidates --json`** — the prefiltered set. Deterministic, no LLM,
+no vectors:
 
-### Step 5: Score + digest modules
+1. Stories with `last_seen` since the last fetch (`first_seen`-based, because
+   arXiv and several vendor blogs publish null or plainly wrong `published_at`
+   — that field is for display only).
+2. Drop anything with `shown_at` set. This, not similarity scoring, is what
+   stops the same story reappearing every day.
+3. Drop titles matching `exclude_terms`.
+4. Apply `per_source_cap` per source.
+5. Order by tier, then `source_count`, then recency. This is presentation
+   order, not a quality claim — the agent re-ranks.
+6. Cap at `candidate_limit`.
 
-**Goal:** Deterministic scoring, `digest.md`.
-
-**Candidate set.** A run scores stories whose `last_seen` is within 24h of
-now. Not `published_at` — arXiv, aggregators, and several vendor blogs
-publish null or plainly wrong dates, and an item with a bad timestamp would
-silently never appear. `published_at` is kept for display and for canonical
-item selection only. A story that gains a new source re-enters the candidate
-set and is rescored, which is correct: coverage breadth is a scoring feature.
-On a first run against a cold archive the window still applies, so the first
-digest is small — that is intended, not a bug.
-
-- `internal/score/weights.go` — parse `config/weights.yml`:
-
-```yaml
-weights:
-  interest:       0.35
-  novelty:        0.25
-  source_count:   0.15
-  source_tier:    0.15
-  primary_source: 0.10
-novelty_window_days: 30
-digest_size:         12
-per_source_cap:      3
-title_simhash_max:   3
-candidate_window_h:  24
+```json
+{
+  "generated_at": "2026-08-30T07:13:00Z",
+  "window": {"since": "2026-08-29T06:55:00Z", "days": 1},
+  "total_new": 287, "returned": 40,
+  "candidates": [
+    {
+      "story_id": 4213,
+      "title": "Cloudflare publishes postmortem on the 26 Aug outage",
+      "url": "https://blog.cloudflare.com/...",
+      "source": "Cloudflare", "tier": 1, "source_count": 4,
+      "published_at": "2026-08-30T05:40:00Z",
+      "primary": true,
+      "excerpt": "On 26 August at 14:02 UTC our edge began returning 522s for..."
+    }
+  ]
+}
 ```
 
-- `internal/score/compute.go` — per story:
-  - **Interest** (0.35) — cosine between the story's canonical item vector
-    and the embedding of the current dated section of
-    `context/interests.md`.
-  - **Novelty** (0.25) — inverse of max cosine to any story in the last 30
-    days. This is the feature that stops the digest being 60% funding rounds.
-  - **Source count** (0.15) — `log(1 + source_count)`, normalized. Falls
-    out of dedupe layers 1–2 for free.
-  - **Source tier** (0.15) — tier 1 = 1.0, tier 2 = 0.7, tier 3 = 0.4.
-  - **Primary source** (0.10) — canonical item's domain in `domains.yml`.
+**`newsops query --json`** — the archive. FTS5 over title and excerpt, with
+filters:
 
-**Normalize interest and novelty across the candidate set before weighting.**
-Both are raw cosines, and for a news excerpt against a prose interests
-paragraph those land in a narrow band — roughly 0.3–0.6 in practice. A
-0.35-weighted term whose values span 0.1 contributes about 0.035 of spread
-across the digest, while `source_tier` — a clean 1.0 / 0.7 / 0.4 — contributes
-its full 0.15. Left raw, the digest is ranked by tier and coverage breadth
-wearing an interest score as decoration, and the numbers in `weights.yml`
-describe something the code does not do.
-
-Min-max across the candidate stories of that run. When the candidate set is
-smaller than 5 stories, min-max is noise: fall back to passing the raw value
-through and note it in the components blob. Store **both** the raw and the
-normalized value for interest and novelty — calibration needs the raw
-distribution, and the gap between raw and normalized is itself the signal
-that tells you whether normalization is still earning its place.
-
-```sql
-CREATE TABLE scores (
-    story_id         INTEGER PRIMARY KEY,
-    components       JSON NOT NULL,   -- {"interest_raw":0.51,"interest":0.72,...}
-    total            REAL NOT NULL,
-    interest_version TEXT NOT NULL,   -- "<section-date>:<hash8>"
-    at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(story_id) REFERENCES stories(id)
-);
-
-CREATE TABLE decisions (
-    story_id INTEGER PRIMARY KEY,
-    action   TEXT NOT NULL CHECK(action IN ('brief','dismiss','post')),
-    at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(story_id) REFERENCES stories(id)
-);
+```
+newsops query --text "cloudflare outage" --days 90 --json
+newsops query --domain cloudflare.com --days 180 --json
+newsops query --story 4213 --related --json    # shares terms/domain, excludes itself
 ```
 
-Store components, not just totals — otherwise the review can't tell you
-which feature actually predicted your clicks. `decisions` is the feedback
-loop: dismissal is a labeled negative, a brief a positive, a post a strong
-positive. It is also the table people skip.
+This is the capability a chat window does not have and the reason an agent
+earns its place here. *"This vendor had an outage three weeks ago and shipped
+a related fix last week"* is not something you can paste into a prompt,
+because you don't know it's there — that's why you're asking. It is also what
+makes a post worth reading rather than another summary of the same press
+release.
 
-**`interest_version` must invalidate.** `context/interests.md` is appended to
-over time and its current section gets rewritten; a stale score computed
-against an old paragraph is worse than no score. Define
-`interest_version` as `<section-date>:<first 8 chars of SHA-256 of the section
-text>` — e.g. `2026-08:a91f3c02`. The `score` pending-input predicate in step 2
-then picks up the mismatch automatically, so editing a paragraph causes the
-next `run` to rescore the window.
+**`newsops decide <story_ids> <action> [--note ...]`** — records `shown`,
+`briefed`, `drafted`, `posted`, `dismissed`. Accepts a comma-separated id
+list, so marking forty candidates shown is one call. The agent calls this as
+the workflow proceeds; `shown` also sets `stories.shown_at`, first write
+winning. `collect` mode records the rank it assigned as `--note "rank=<n>"` —
+that note is what lets the review ask whether the agent's ordering predicted
+your picks.
 
-**No embeddings means no scores.** If `EMBEDDING_API_KEY` is unset, `embed`
-skips with a warning and `items_out: 0`. `score` must then refuse: exit 2
-with `{"error": "no embeddings"}`. It must **not** renormalize the remaining
-weights and carry on — a digest ranked purely on tier and coverage breadth
-looks completely normal, which makes it worse than no digest at all. Failure
-here should be loud.
+**`newsops show <story_id> --json`** — one story with all its items, sources
+and decision history. What `brief` mode opens with.
 
-- `internal/digest/write.go` — top N by score, `per_source_cap` enforced
-  (counted against the **canonical item's** source), numbered by story ID.
-  Writes `digest.md` and an archived copy at `digest/YYYY-MM-DD.md`; the
-  archive is what makes a weekly review possible.
+**Exit codes:** 0 success or skipped, 1 partial (some feeds failed, candidates
+still produced), 2 hard failure. `collect` continues past a stage that exits
+1 — a partial fetch is still worth reading — aborts on 2, and returns the
+worst code any stage returned.
 
-```markdown
-# Digest — 2026-08-30
-_287 items → 231 stories → 12 shown_
+**Tests:** golden test on `candidates` over a fixed seeded database — assert
+the exact ordering, that `per_source_cap` drops the fourth item from one
+source, and that a story with `shown_at` set never reappears.
 
-## [4213] Cloudflare publishes postmortem on the 26 Aug outage  (0.81)
-cloudflare.com · 4 sources · tier 1 · primary
-https://blog.cloudflare.com/...
-> interest 0.74 · novelty 0.88 · sources 0.45 · tier 1.00 · primary 1.00
-```
+### Step 5: The agent layer — collect, digest, brief
 
-Showing the component breakdown inline costs one line and makes miscalibration
-visible immediately — you'll see *why* something ranked before you have to go
-query for it.
+**Goal:** The daily loop, as harness-neutral markdown.
 
-**Formula, not holistic judgment.** The score decides what you *never see*,
-at high volume. An uncalibrated holistic score silently drops things and you
-never learn what. Holistic judgment is fine on the surviving top 20, where
-you read everything anyway.
+`AGENTS.md` is canonical. `CLAUDE.md` contains `@AGENTS.md` and nothing else.
+Any Claude Code slash commands are one-liners pointing at mode files. Nothing
+that matters is harness-specific, so this runs in Pi with no rewrite.
 
-**Tests:** golden test over a fixed candidate set with hand-written vectors —
-assert the exact output ordering, that `per_source_cap` drops the fourth item
-from one source, and that a candidate set of 3 takes the raw-passthrough
-path.
-
-### Step 6: Stop. Run it for two weeks.
-
-Not a build step, and the most important instruction in this document.
-
-At this point the system works end to end with no LLM anywhere. Before
-building anything deferred, measure:
-
-- **Duplicate leakage** — how many digest slots went to a story that already
-  appeared? Under ~5% and dedupe layer 3 is never written.
-- **Interest separation** — do interest scores actually separate the stories
-  you clicked from the ones you didn't, or do they cluster in a band? This
-  is the trigger for summarize-then-embed.
-- **Calibration** — label 50–100 stories by hand and take the Spearman
-  correlation between the score and your own ordering. Without hand labels
-  you're adjusting weights on vibes. Expect a couple of tier-3 outlets to
-  earn promotion and two or three tier-1 blogs to post too rarely to matter.
-
-Resist step 7 until the digest is genuinely worth reading.
-
-### Step 7: Deep interactive mode
-
-**Goal:** The one place an agent earns its place — querying the archive.
-
-An agent is justified when it needs tools a chat window lacks, or when
-repetition is high enough that a versioned prompt beats retyping. Here that
-is one operation out of four: *"this vendor had an outage three weeks ago and
-shipped a related fix last week"* needs a similarity search over 90 days. You
-can't paste that context because you don't know it's there — which is why
-you're asking.
-
-- `modes/_shared.md` — non-negotiables, plus **the freshness protocol**:
+**`modes/_shared.md`** — loaded by every mode:
 
 ```markdown
 Before answering anything about current news:
 1. Run `newsops status --json`.
-2. If fetch is stale (>6h), run `newsops run --max-age 6h --json`.
-3. Read `digest.md`.
-Never re-fetch a source by hand; the pipeline owns collection.
-Never reproduce source paragraphs. Never publish. Prefer primary sources.
-The brief is the deliverable, not a draft.
+2. If fetch is stale (>6h), run `newsops collect --max-age 6h --json`.
+
+Never re-fetch a feed by hand; the CLI owns collection.
+Never reproduce source paragraphs — everything you write is written fresh.
+Never publish anything anywhere. Drafts go to disk; the human posts them.
+Prefer the primary source over coverage of it.
+Record what happens with `newsops decide`.
 ```
 
-- `modes/deep.md` — deep research on one story ID:
-  - Query `news.db` for related stories over 90 days.
-  - Link-following: outbound links from the story's items, filtered to
-    `domains.yml` primaries, fetched and read.
-  - Write the brief to `briefs/<story_id>.md` and record
-    `decisions(story_id, 'brief')`.
-  - Brief format, five fixed parts: core fact in one sentence · primary
-    source link · what most coverage skipped or got wrong · connection to
-    prior events in the archive · one thing you might disagree with.
-- `context/interests.md` — dated sections, appended, never overwritten:
+**`modes/collect.md`** — collect and produce the digest:
+
+1. `newsops collect --max-age 6h --json`.
+2. Read `context/interests.md` (current section) and `context/beats.md`.
+3. Skim all ~40 candidates. Rank them by how interesting they are *to this
+   user given those files* — not by general newsworthiness.
+4. Write `digest.md`: one line per candidate, most interesting first, each
+   with a story ID, title, source, and **a short reason it might matter to
+   you**. Flag anything the archive suggests is a follow-up to something
+   already covered.
+5. `newsops decide <ids> shown --note "rank=<n>"` for every candidate listed.
+6. Stop. Ask which ones are worth briefing. Do not brief anything unasked.
 
 ```markdown
-## 2026-08 (current)
-Agent memory and context engineering — specifically where retrieval
-beats fine-tuning. Also watching eval tooling consolidate.
+# Digest — 2026-08-30
+_287 new items → 40 candidates_
 
-## 2026-06 (archived)
-Inference cost curves, quantization.
+1. **[4213]** Cloudflare postmortem on the 26 Aug outage · cloudflare.com · 4 sources
+   Primary source, and you covered their July incident — this is the follow-up.
+2. **[4198]** Postgres 18 ships async I/O · postgresql.org · 2 sources
+   Directly in your infra beat; the benchmark numbers are the story, not the release.
+...
 ```
 
-Rewriting a paragraph takes thirty seconds; retuning fifteen numeric weights
-takes an evening and you'll never do it. Keeping archived sections lets the
-weekly review ask whether stated interests match actual clicks — they usually
-don't, and the gap is the interesting part.
+The reason line is the whole value of the digest. A bare list of headlines is
+something an RSS reader already gives you.
 
-- `context/voice.md`, `context/beats.md` — templates. Voice is ~10 of your
-  own posts as style anchors, beats is standing topics and topics to avoid.
+**`modes/brief.md`** — research one story, on request:
 
-**No `brief` or `draft` mode.** Extract a `brief` mode only after typing the
-same framing three times; that repetition is the signal, and anticipating it
-is architecture for its own sake. `draft` stays unbuilt: model-written
-LinkedIn posts are recognizable, and the recognition costs more credibility
-than the reach gains. Automate finding and digesting — 90% of the time cost —
-and keep the writing.
+1. `newsops show <id> --json`.
+2. Fetch and read the actual article. Follow outbound links filtered to
+   `domains.yml` primaries — the changelog, the paper, the filing. This is
+   the five-to-ten tool calls you'd skip on a Tuesday, and skipping them is
+   how people end up writing from coverage instead of sources.
+3. `newsops query --story <id> --related --days 90` for archive connections.
+4. Write `briefs/<story_id>-<slug>.md` in a fixed five-part shape:
+   - **Core fact** — one sentence.
+   - **Primary source** — the link.
+   - **What coverage skipped or got wrong.**
+   - **Connection to prior events** in the archive, with story IDs.
+   - **One thing you might disagree with.**
+5. `newsops decide <id> briefed`.
+6. Stop. The brief is the deliverable of this mode.
+
+Fixed shape because a brief you can skim in fifteen seconds is one you'll
+actually read; free-form summaries drift into being the article again.
+
+**Tests:** none — this is prose. Verification is running it (below).
+
+### Step 6: Voice + draft
+
+**Goal:** A draft that sounds like you, from a brief you chose.
+
+**`context/voice/`** — roughly ten of your own posts, one file each, best
+ones you'd be happy to have written again. This is the input; without it,
+nothing in this step works.
+
+**`context/voice-guide.md`** — derived, then hand-edited. `modes/voice.md`
+reads the samples and distills them into explicit rules: typical length,
+how you open, whether you use questions, lists, first person; what you never
+do; recurring structural moves. Regenerate when you add samples.
+
+Samples plus a derived guide, rather than either alone: tone transfer from
+examples generally beats instructions about tone, but when a draft comes out
+sounding wrong, an explicit rule is something you can *edit*. A sample set is
+not. You need both — the examples to imitate, the rules to correct.
+
+**`modes/draft.md`** — takes a brief and a target:
+
+- `--linkedin` — 150–250 words. One idea. A hook that isn't a question, a
+  concrete detail from the primary source, a position. No hashtag spray, no
+  "thoughts?", no em-dash-heavy LLM cadence. Link goes in the first comment,
+  emitted as a separate block, because LinkedIn is widely reported to suppress
+  reach on posts with external links — test that against your own numbers,
+  platform behaviour moves.
+- `--blog` — 800–1200 words. Context, the thing itself, why it matters,
+  what you'd watch next. Subheads. Links inline.
+
+Both read `context/voice-guide.md` and few-shot from `context/voice/`. Both
+write to `posts/<date>-<slug>-<target>.md` and call
+`newsops decide <id> drafted`.
+
+**The draft is a starting point, not an artifact.** It exists to kill the
+blank page. Expect to rewrite most of it — and note that the reason v1–v3 of
+this plan refused to build this step is real: model-written posts are
+recognizable, and the credibility cost of publishing one unedited exceeds
+whatever reach it earns. The guard against that is the human gate before this
+mode ever runs, and the expectation that you edit. Nothing in the code can
+enforce it.
+
+### Step 7: Use it, then measure
+
+Not a build step. Run the loop for two weeks before changing anything, then
+ask:
+
+- **Digest quality** — of the stories you asked to brief, how many came from
+  the agent's top 5? (The `rank=` note on each `shown` decision is what makes
+  this answerable.) If the ranking is uncorrelated with your picks,
+  `interests.md` is too vague, not the prompt.
+- **Duplicate leakage** — how many digest lines were the same story twice?
+  Under ~5% and the two dedupe layers are sufficient forever.
+- **Prefilter loss** — spot-check what the `candidate_limit: 40` cut dropped.
+  If good stories are dying there, raise the cap before touching anything
+  else.
+- **Voice drift** — do drafts need heavy rewriting in the same way every
+  time? That's a missing rule in `voice-guide.md`, and it's editable.
+- **`decisions`** — the log of shown vs briefed vs drafted is the only
+  honest record of whether this is working.
+
+Deliberately not planned until this measurement says otherwise: semantic
+dedupe, embedding-based interest scoring, a `publish` command, any web UI.
 
 ---
 
 ## Critical files & anchors
 
 | File | Symbol | Reason |
-|------|--------|--------|
-| `internal/store/schema.go` | Table definitions, migrations | Foundation |
-| `internal/runstate/` | `LastSuccess` | Replaces cron; enables `--max-age` and `status` |
-| `cmd/newsops/main.go` | Subcommand routing, `--json`, stage gating | The agent's entire contract with the pipeline |
+|---|---|---|
+| `AGENTS.md` + `modes/` | — | Where all behavior lives; harness-neutral by construction |
+| `cmd/newsops/main.go` | Subcommand routing, `--json` | The agent's entire contract with the pipeline |
+| `internal/candidates/` | Prefilter + `shown_at` exclusion | Volume control, and the thing that stops repeats |
 | `internal/dedupe/canonical.go` | URL normalization | Does most of the dedupe work for zero cost |
-| `internal/score/compute.go` | Weighted formula + per-run normalization | Deterministic ranking |
+| `internal/store/schema.go` | Tables, FTS, migrations | Foundation; `decisions` is the feedback record |
+| `context/voice-guide.md` | — | The editable half of voice; the correction surface |
 
 ---
 
 ## Verification
 
-1. **Build:** `go build ./cmd/newsops/` — single binary, no cgo.
-2. **Unit tests:** `go test ./...` passes; `internal/dedupe` and
-   `internal/score` are the two packages that must have real coverage.
+1. **Build:** `go build ./cmd/newsops/` — one static binary, no cgo.
+2. **Tests:** `go test ./...`. `internal/dedupe` and `internal/candidates`
+   must have real coverage.
 3. **Sources:** `./newsops sources:check` — ≥80% pass after one round of URL
    fixes.
-4. **Idempotence:** `./newsops fetch --max-age 6h` twice in a row — second
-   run exits 0 with `{"skipped": true}` and no network traffic.
-5. **Status contract:** `./newsops status --json | jq .stages.fetch.stale`
-   returns `true` before any run has happened (not an error, not null).
-6. **Stage gating:** with a fresh fetch and a stale score, `./newsops run`
-   still scores — assert new items reach the digest rather than being
-   skipped as "fresh".
-7. **Lock:** two concurrent `./newsops run` — the second exits 2 with
-   `{"error": "locked"}` immediately (does not hang), and
-   `PRAGMA integrity_check` passes afterward.
-8. **Dedupe layer 1:** seed a HN item and the article it links to; verify
-   one story with `source_count: 2`, `method: "url"`.
-9. **Dedupe layer 2:** two outlets covering one story with differing
-   headlines; verify one story, `method: "title"`.
-10. **ID stability:** run `dedupe` twice over the same data; verify no story
-    ID changed and no new story rows were created.
-11. **Digest:** `./newsops score && ./newsops digest` — 12 stories, ordered,
-    `per_source_cap` enforced, component breakdown on each line, and
-    `digest/YYYY-MM-DD.md` written.
-12. **Degradation:** unset `EMBEDDING_API_KEY`, run `score` — exits 2 with
-    `{"error": "no embeddings"}` and writes no `scores` rows.
-13. **Deep mode:** load `modes/deep.md`, ask for a story ID; verify it calls
-    `status` first and returns real archive connections.
+4. **Status on a virgin DB:** `./newsops status --json | jq .stages.fetch.stale`
+   returns `true`, not an error and not null.
+5. **Idempotence:** `./newsops collect --max-age 6h` twice — the second
+   reports the fetch skipped, with no network traffic.
+6. **Stage gating:** with a fresh fetch but unprocessed items, `collect` still
+   dedupes and produces candidates.
+7. **Lock:** two concurrent `collect` — the second exits 2 with
+   `{"error": "locked"}` immediately, and `PRAGMA integrity_check` passes.
+8. **Dedupe L1:** seed a HN item and the article it links to → one story,
+   `source_count: 2`, `method: "url"`, HN in `story_sources` as `discussion`.
+9. **Dedupe L2:** two outlets, differing headlines, one story, `method: "title"`.
+10. **ID stability:** run `dedupe` twice over the same data — no ID changes,
+    no new rows.
+11. **No repeats:** run `candidates` twice with `decide … shown` in between —
+    the second returns none of the same stories.
+12. **Archive query:** `newsops query --text "outage" --days 90 --json`
+    returns hits with story IDs, over a seeded archive.
+13. **Collect mode end-to-end:** in a session, load `modes/collect.md` — it
+    calls `status` first, produces `digest.md` with a reason line per entry,
+    and stops without briefing anything.
+14. **Brief mode:** ask for two story IDs — two files in `briefs/`, five-part
+    shape, at least one real archive connection with a story ID, and
+    `decisions` rows written.
+15. **Draft mode:** with ~10 samples in `context/voice/`, generate both
+    targets from one brief. The honest test is whether you'd post it after
+    editing, not before.
 
 ---
 
 ## Assumptions & contingencies
 
-- **Embedding provider:** Voyage 3 (1024d) by default via env var. OpenAI
-  `text-embedding-3-small` is a drop-in. Missing key → `embed` skips with a
-  warning; `score` then fails loudly rather than producing a plausible-looking
-  digest ranked on 40% of its weights.
-- **Summarize-then-embed (deferred):** not built now. It helps interest
-  matching but actively *hurts* dedupe — a summary abstracts away exactly the
-  entity names and version numbers that distinguish near-identical stories —
-  and it puts an LLM call plus nondeterminism back into the batch loop.
-  **Trigger:** if after two weeks interest scores fail to separate things you
-  clicked from things you didn't, add a *second* vector
-  (`embeddings.kind = 'summary'`) computed only for the ~40 stories that
-  survive the prefilter — not all 300 items.
-- **Dedupe layer 3 (deferred):** see step 3. Measure before building, and
-  remember it requires a back-fill of non-canonical item embeddings.
-- **arXiv volume:** cs.LG alone runs to hundreds of papers daily.
-  `per_source_cap: 3` handles it mechanically. If it still floods, filter
-  subcategories or raise its interest threshold specifically.
-- **Techmeme:** already an editorially clustered feed with human editors.
-  Treat divergence from our dedupe as a tuning signal, not a bug.
-- **Interest blending from `decisions`:** deferred until two weeks of real
-  usage. Initial scoring uses stated interests only. Cap implicit signal at
-  30% when added — pure implicit feedback collapses into showing you more of
-  yesterday, the opposite of tracking a shifting interest.
-- **No cron anywhere.** If this later moves to a server, `newsops run
-  --max-age 6h` is already the right cron line — the guard means cron and
-  agent invocation can coexist safely.
+- **No embedding API key needed anywhere.** If interest matching by prose
+  turns out to be too coarse, the fallback is a better `interests.md`, not a
+  vector database.
+- **The agent's skim is the quality bottleneck.** ~40 candidates at ~1500
+  chars each is a large but manageable read. If it degrades, lower
+  `candidate_limit` before adding cleverness.
+- **arXiv floods.** `per_source_cap: 3` handles it mechanically. If it still
+  dominates, cut subcategories in `sources.yml`.
+- **Techmeme is already an editorially clustered feed.** Treat divergence
+  from our dedupe as a signal about our thresholds, not a bug.
+- **Feed URLs drift.** `sources:check` monthly is the maintenance cost of
+  this system, and roughly all of it.
+- **Long gaps are normal.** `max_backfill_days: 30` bounds the first run and
+  any return from holiday.
+- **`interests.md` is the actual product.** Everything else is scaffolding.
+  Dated sections, appended, never overwritten — keeping the archived ones is
+  what lets you notice that what you said you cared about and what you
+  actually briefed are different things.
 
 ---
 
@@ -727,17 +749,16 @@ and keep the writing.
 
 | Decision | Rationale |
 |---|---|
-| Two loops, human pick between them | The human pick is the value; automating it defeats the purpose |
-| No LLM in the batch loop | Deterministic, free, reproducible |
-| Dedupe before embedding | Layers 1–2 need no vectors and cut the volume to embed |
-| Canonical items only get vectors | One vector per story is exactly what scoring reads |
-| URL canonicalization over embedding clustering | Aggregators link to the original; canonicalizing dedupes them exactly, for free |
-| Formula scoring, not holistic | The score decides what you never see; uncalibrated judgment drops things silently |
-| Normalize interest and novelty per run | Raw cosines occupy a narrow band; unnormalized, the weights are fiction |
-| Brute-force cosine, no vector DB | 10k vectors is milliseconds; a vector store adds only deployment risk |
-| Hosted embedding API | Local models are a Python ecosystem; cents/month at this volume |
-| Interests as prose, not weights | A paragraph gets rewritten; weights never get retuned |
+| Agent judges, CLI narrows | Judgment is what a model is good at; concurrency, dedupe and memory are what it is bad at |
+| No embeddings anywhere | Three build steps and a calibration period to approximate a judgment made for free while reading the list |
+| Full-text archive query, not vector similarity | FTS5 answers "have we covered this" well enough, with no key, no cache, no dimension mismatch |
+| Two human gates | The first saves tokens; the second keeps you deciding what carries your name |
+| Digest carries a reason per line | A bare headline list is what an RSS reader already does |
+| URL canonicalization over semantic dedupe | Aggregators link to the original; canonicalizing dedupes them exactly, for free |
+| `shown_at`, not similarity, prevents repeats | Exact, trivial, and correct — no threshold to tune |
 | Story IDs permanent | Briefs and decisions reference them; silent renumbering is unrecoverable |
-| Fail loudly with no embeddings | A digest missing 60% of its weights looks normal, which is worse |
-| Brief, not draft | Model-written posts are recognizable; the credibility cost exceeds the reach gain |
-| One mode file, not four | An agent earns its place only where it needs tools chat lacks — here, the archive query |
+| Drafting in scope, gated behind a pick | Reverses v1–v3. The blank page is real; the credibility risk is managed by the gate and by editing |
+| Voice = samples + derived rules | Examples transfer tone; rules are what you can edit when it drifts |
+| Drafts to disk, no publishing | No credentials in the repo, no irreversible action one command away |
+| Harness-neutral markdown | Claude Code today, Pi tomorrow, no rewrite |
+| Go single binary | No venv or node_modules to drift; a dependency failure mid-session is the worst failure mode |
