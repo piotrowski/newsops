@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Untitled Blog</title>
+    <link>https://blog.example.com</link>
+    <item>
+      <title>Post Without a Publication Date</title>
+      <link>https://blog.example.com/no-date-post</link>
+      <description>This post has no publication date in the feed.</description>
+      <guid isPermaLink="true">https://blog.example.com/no-date-post</guid>
+    </item>
+  </channel>
+</rss>

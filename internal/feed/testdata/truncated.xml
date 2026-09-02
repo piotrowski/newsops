@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Tech News Network</title>
+    <link>https://technews.example.net</link>
+    <item>
+      <title>Major Security Vulnerability Found in Popular Library</title>
+      <link>https://technews.example.net/vulnerability-2025</link>
+      <description>A critical security vulnerability has been discovered in a widely-used open-source library. The issue affects all versions from 1.0 through 2.5 and allows remote code execution on affected systems. Users are advised to update to the latest patched version immediately. Continue reading →</description>
+      <pubDate>Sun, 31 Aug 2025 18:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

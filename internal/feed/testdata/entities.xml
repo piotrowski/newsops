@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Entity Test Feed</title>
+    <link>https://example.com</link>
+    <item>
+      <title>Understanding C++ &amp; Rust: A Comparison</title>
+      <link>https://example.com/cpp-rust-comparison</link>
+      <description><![CDATA[<p>A deep dive into the differences between C++ and Rust, including ownership models, memory safety guarantees, and performance characteristics.</p><p>Rust's borrow checker prevents data races at compile time — something that &ldquo;just works&rdquo; for most developers once they get past the learning curve.</p>]]></description>
+      <pubDate>Sat, 30 Aug 2025 14:00:00 GMT</pubDate>
+      <category>C++</category>
+      <guid isPermaLink="true">https://example.com/cpp-rust-comparison</guid>
+    </item>
+  </channel>
+</rss>

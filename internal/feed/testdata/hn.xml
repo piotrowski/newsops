@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:hn="https://hnrss.org">
+  <channel>
+    <title>Hacker News Front Page</title>
+    <link>https://news.ycombinator.com</link>
+    <item>
+      <title>Show HN: A new programming language for systems work</title>
+      <link>https://example-lang.dev</link>
+      <description>This is a new systems programming language with memory safety guarantees and zero-cost abstractions.</description>
+      <comments>https://news.ycombinator.com/item?id=42000001</comments>
+      <pubDate>Mon, 01 Sep 2025 08:00:00 GMT</pubDate>
+      <guid isPermaLink="false">https://example-lang.dev</guid>
+    </item>
+    <item>
+      <title>PostgreSQL 18 Released with Major Query Optimizer Improvements</title>
+      <link>https://postgresql.org/about/news/postgresql-18-released-42000</link>
+      <description>The PostgreSQL Global Development Group announced the release of version 18.</description>
+      <comments>https://news.ycombinator.com/item?id=42000002</comments>
+      <pubDate>Sun, 31 Aug 2025 22:00:00 GMT</pubDate>
+      <guid isPermaLink="false">https://postgresql.org/about/news/postgresql-18-released-42000</guid>
+    </item>
+  </channel>
+</rss>

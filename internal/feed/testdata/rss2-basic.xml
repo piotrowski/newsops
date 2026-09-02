@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Tech News Daily</title>
+    <link>https://technews.example.com</link>
+    <item>
+      <title>New Database Technology Promises Faster Queries</title>
+      <link>https://technews.example.com/new-db-tech</link>
+      <description>A new database technology promises faster queries and lower latency.</description>
+      <content:encoded><![CDATA[<p>A new database technology promises faster queries and lower latency. The system uses a novel indexing approach that reduces read times by 40% compared to traditional B-tree indexes.</p><h2>Benchmarks</h2><p>Early benchmarks show promising results for both OLTP and analytical workloads. The team behind the project released their methodology on GitHub.</p><script>alert('xss')</script><style>.hidden { display: none; }</style><p>More details to follow in next week's edition.</p>]]></content:encoded>
+      <pubDate>Mon, 01 Sep 2025 12:00:00 GMT</pubDate>
+      <category>Database</category>
+      <category>Performance</category>
+      <guid isPermaLink="true">https://technews.example.com/new-db-tech</guid>
+    </item>
+    <item>
+      <title>Cloud Provider Announces New Region</title>
+      <link>https://technews.example.com/cloud-region</link>
+      <description>A major cloud provider has announced a new data center region.</description>
+      <content:encoded><![CDATA[<p>The new region will serve the Asia-Pacific area with three availability zones. Expected to go live in Q1 2026.</p>]]></content:encoded>
+      <pubDate>Sun, 31 Aug 2025 09:00:00 GMT</pubDate>
+      <category>Cloud</category>
+      <guid isPermaLink="true">https://technews.example.com/cloud-region</guid>
+    </item>
+  </channel>
+</rss>

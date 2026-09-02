@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>r/programming</title>
+    <link>https://www.reddit.com/r/programming</link>
+    <item>
+      <title>Rust 1.85 Released with New Pattern Matching Features</title>
+      <link>https://www.reddit.com/r/programming/comments/abc123/</link>
+      <description>&lt;p&gt;The Rust team has released version 1.85 with exciting new pattern matching capabilities including or-patterns in function signatures and improved match ergonomics.&lt;/p&gt;&lt;p&gt;Read more at &lt;a href="https://blog.rust-lang.org/v1.85.0/"&gt;the official blog&lt;/a&gt;.&lt;/p&gt;</description>
+      <pubDate>Mon, 01 Sep 2025 06:00:00 GMT</pubDate>
+      <guid isPermaLink="false">t3_abc123</guid>
+    </item>
+  </channel>
+</rss>

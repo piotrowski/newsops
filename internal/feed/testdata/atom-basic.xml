@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Engineering Blog</title>
+  <link href="https://engineering.example.com"/>
+  <updated>2025-09-01T10:00:00Z</updated>
+  <entry>
+    <title>Understanding Modern CSS Layouts</title>
+    <link href="https://engineering.example.com/css-layouts"/>
+    <id>https://engineering.example.com/css-layouts</id>
+    <content type="html"><![CDATA[<p>CSS Grid and Flexbox have revolutionized web layout. This post covers the fundamentals of modern CSS layouts with practical examples.</p><ul><li>Grid basics</li><li>Flexbox patterns</li><li>Responsive design</li></ul><script>console.log('tracker')</script><p>Check out the interactive demo linked below.</p>]]></content>
+    <published>2025-09-01T10:00:00Z</published>
+    <updated>2025-09-01T10:00:00Z</updated>
+    <category term="CSS"/>
+    <category term="Web Development"/>
+  </entry>
+  <entry>
+    <title>Building a REST API in Go</title>
+    <link href="https://engineering.example.com/go-rest-api"/>
+    <id>https://engineering.example.com/go-rest-api</id>
+    <summary>A comprehensive guide to building production-ready REST APIs in Go.</summary>
+    <published>2025-08-30T14:00:00Z</published>
+    <category term="Go"/>
+    <category term="Backend"/>
+  </entry>
+</feed>
