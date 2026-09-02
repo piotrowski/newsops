@@ -60,7 +60,14 @@ var (
 	configDir string
 	verbose   bool
 	stderr    = os.Stderr
+
+	// fetch-specific flags (filled by cobra).
+	fetchSource   string
+	fetchMaxAge   time.Duration
+	fetchSince    string
+	fetchNoCache  bool
 )
+
 
 func main() {
 	root := &cobra.Command{
@@ -94,6 +101,10 @@ Global flags:
 	root.PersistentFlags().StringVar(&dbDir, "db", "data/", "database directory")
 	root.PersistentFlags().StringVar(&configDir, "config", "config/", "configuration directory")
 	root.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output to stderr")
+	root.PersistentFlags().StringVar(&fetchSource, "source", "", "restrict fetch to one source by name")
+	root.PersistentFlags().DurationVar(&fetchMaxAge, "max-age", 0, "skip if last success is fresher than this duration (e.g. 6h)")
+	root.PersistentFlags().StringVar(&fetchSince, "since", "", "override fetch window start with RFC3339 time")
+	root.PersistentFlags().BoolVar(&fetchNoCache, "no-cache", false, "skip raw-body writes during fetch")
 
 	// Build subcommands from the routing table.
 	for name, fn := range commands {
@@ -110,11 +121,8 @@ Global flags:
 		sub.PersistentFlags().StringVar(&dbDir, "db", "data/", "")
 		sub.PersistentFlags().StringVar(&configDir, "config", "config/", "")
 		sub.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "")
-
 		root.AddCommand(sub)
 	}
-
-	// Parse global flags before dispatch so --json is available even for
 	// unknown subcommands.
 	if err := root.ParseFlags(os.Args[1:]); err != nil {
 		fmt.Fprintln(stderr, "flag error:", err)
@@ -286,9 +294,6 @@ func cmdSourcesCheck(context.Context, []string) (any, error) {
 	return &ExitError{Code: 2, Slug: "not_implemented", Message: "sources:check not yet implemented"}, nil
 }
 
-func cmdFetch(context.Context, []string) (any, error) {
-	return &ExitError{Code: 2, Slug: "not_implemented", Message: "fetch not yet implemented"}, nil
-}
 
 func cmdDedupe(context.Context, []string) (any, error) {
 	return &ExitError{Code: 2, Slug: "not_implemented", Message: "dedupe not yet implemented"}, nil
