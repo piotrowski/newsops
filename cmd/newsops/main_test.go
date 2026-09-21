@@ -38,7 +38,7 @@ func TestRunCommand_Version(t *testing.T) {
 func TestRunCommand_Stub(t *testing.T) {
 	ctx := context.Background()
 	for name, fn := range commands {
-		if name == "version" {
+		if name == "version" || name == "status" {
 			continue
 		}
 		err := runCommand(ctx, fn, nil)
@@ -225,19 +225,31 @@ func TestIntegration_Version(t *testing.T) {
 func TestIntegration_SubcommandJSON(t *testing.T) {
 	cmd := exec.Command(binPath(), "status", "--json")
 	out, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatal("expected non-zero exit for stub command")
-	}
-	if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 2 {
-		t.Fatalf("expected exit code 2, got %v", err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, string(out))
 	}
 
-	var envelope map[string]any
-	if err := json.Unmarshal(out, &envelope); err != nil {
+	var result map[string]any
+	if err := json.Unmarshal(out, &result); err != nil {
 		t.Fatalf("output is not valid JSON: %s\nerr: %v", string(out), err)
 	}
-	if slug, ok := envelope["error"].(string); !ok || slug != "not_implemented" {
-		t.Errorf("expected error=not_implemented, got %v", envelope["error"])
+
+	// Verify top-level keys exist.
+	for _, key := range []string{"stages", "counts", "digest"} {
+		if _, ok := result[key]; !ok {
+			t.Errorf("missing key %q in status output", key)
+		}
+	}
+
+	// Verify stages has the three expected stages.
+	stages, ok := result["stages"].(map[string]any)
+	if !ok {
+		t.Fatal("stages should be a JSON object")
+	}
+	for _, stageName := range []string{"fetch", "dedupe", "candidates"} {
+		if _, ok := stages[stageName]; !ok {
+			t.Errorf("missing stage %q in status output", stageName)
+		}
 	}
 }
 

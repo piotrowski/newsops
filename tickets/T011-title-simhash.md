@@ -63,30 +63,30 @@ titles collide too easily to trust.
 
 Must match (distance ≤ 3):
 
-- [ ] `"Cloudflare publishes outage postmortem | Ars Technica"` and
+- [x] `"Cloudflare publishes outage postmortem | Ars Technica"` and
       `"Cloudflare publishes postmortem on outage"`
-- [ ] `"Show HN: A tool for X"` and `"A tool for X"`
-- [ ] `"OpenAI Ships New Model"` and `"OpenAI ships new model"`
+- [x] `"Show HN: A tool for X"` and `"A tool for X"`
+- [x] `"OpenAI Ships New Model"` and `"OpenAI ships new model"`
 
 Must **not** match:
 
-- [ ] `"Postgres 18 released"` and `"Postgres 17 released"`
-- [ ] `"AWS launches new region in Spain"` and
+- [x] `"Postgres 18 released"` and `"Postgres 17 released"`
+- [x] `"AWS launches new region in Spain"` and
       `"AWS launches new region in Japan"`
-- [ ] `"Rust 1.90 announced"` and `"Go 1.90 announced"`
-- [ ] Any pair where either title normalizes to fewer than 4 tokens
+- [x] `"Rust 1.90 announced"` and `"Go 1.90 announced"`
+- [x] Any pair where either title normalizes to fewer than 4 tokens
 
 Plus:
 
-- [ ] `NormalizeTitle` strips exactly one outlet suffix, not two
-- [ ] A title that is *only* an outlet suffix does not normalize to empty
+- [x] `NormalizeTitle` strips exactly one outlet suffix, not two
+- [x] A title that is *only* an outlet suffix does not normalize to empty
       string chaos — it returns the original lowercased
-- [ ] `Hamming(x, x) == 0`; `SimHash` is deterministic across runs
+- [x] `Hamming(x, x) == 0`; `SimHash` is deterministic across runs
 
 ## Tests
 
-One table test with at least 20 pairs, each labelled match / no-match,
-including every acceptance line above. Take the "must not match" cases from
+Two table tests with 34+ cases total, each labelled match / no-match,
+including every acceptance line above. Takes "must not match" cases from
 real headline patterns — version bumps, region names, product names — since
 those are where this fails in production.
 

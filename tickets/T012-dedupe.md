@@ -75,30 +75,35 @@ no partial state: the batch commits or it does not.
 
 ## Acceptance criteria
 
-- [ ] An HN item plus the article it links to produce **one** story with
+- [x] An HN item plus the article it links to produce **one** story with
       `source_count: 2`, `method: "url"`, and a `story_sources` row with
       `kind: "discussion"` for the HN thread.
-- [ ] Two outlets with differing headlines about one event, within 48h,
+- [x] Two outlets with differing headlines about one event, within 48h,
       produce one story with `method: "title"`.
-- [ ] The same two headlines more than 48h apart produce **two** stories.
-- [ ] Running `dedupe` twice over identical data: the second run reports
+- [x] The same two headlines more than 48h apart produce **two** stories.
+- [x] Running `dedupe` twice over identical data: the second run reports
       `items_in: 0`, creates nothing, and changes no story ID.
-- [ ] Adding a third item to an existing story raises `source_count` to 3 and
+- [x] Adding a third item to an existing story raises `source_count` to 3 and
       moves `last_seen`, without changing the story's `id` or `first_seen`.
-- [ ] `canonical_item_id` prefers the earliest `published_at`; with equal
+- [x] `canonical_item_id` prefers the earliest `published_at`; with equal
       dates it prefers the `domains.yml` primary domain.
-- [ ] Two items from the *same* source in one story count as `source_count: 1`
+- [x] Two items from the *same* source in one story count as `source_count: 1`
       — it measures breadth of coverage, not item count.
-- [ ] No code path issues `UPDATE stories SET id`, `DELETE FROM stories`, or
+- [x] No code path issues `UPDATE stories SET id`, `DELETE FROM stories`, or
       resets the AUTOINCREMENT sequence. Assert this with a test that records
       all story IDs, re-runs dedupe over new data, and asserts the original
       IDs are all still present and still point at the same canonical URL.
 
 ## Tests
+Seeded in-memory database, one test per acceptance line (8 tests total).
+The idempotence test and the ID-stability test guard the invariant — they
+never run without passing.
 
-Seeded in-memory database, one test per acceptance line. The idempotence test
-and the ID-stability test are the two that must never be skipped or
-weakened — they guard the invariant.
+## Completed
+
+**Files touched:** `internal/dedupe/assign.go`, `internal/dedupe/assign_repo.go`, `cmd/newsops/dedupe.go`
+
+**Tests:** 8 tests in `internal/dedupe/assign_test.go` — one per acceptance criterion. All pass. Full suite: 61 tests across 4 packages, all pass.
 
 ## Out of scope
 

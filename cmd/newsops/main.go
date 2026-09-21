@@ -286,9 +286,6 @@ func humanize(v any) string {
 
 // --- stub commands (replaced by later tickets) ---
 
-func cmdStatus(context.Context, []string) (any, error) {
-	return &ExitError{Code: 2, Slug: "not_implemented", Message: "status not yet implemented"}, nil
-}
 
 
 func cmdCandidates(context.Context, []string) (any, error) {
