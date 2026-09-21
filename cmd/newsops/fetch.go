@@ -49,29 +49,15 @@ type failureRecord struct {
 
 // dbStateStore implements feed.StateStore backed by the SQLite database.
 type dbStateStore struct {
-	db *store.DB
+	repo fetchRepo
 }
 
 func (s *dbStateStore) Get(ctx context.Context, source string) (string, string, error) {
-	var etag, lastModified string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT etag, last_modified FROM feed_state WHERE source = ?`, source).
-		Scan(&etag, &lastModified)
-	if err != nil {
-		return "", "", nil // no row → no conditional headers
-	}
-	return etag, lastModified, nil
+	return s.repo.GetFeedState(ctx, source)
 }
 
 func (s *dbStateStore) Put(ctx context.Context, source, feedURL, etag, lastModified string, status int, errMsg string) error {
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO feed_state(source, url, etag, last_modified, last_fetched, last_status, last_error)
-		 VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
-		 ON CONFLICT(source) DO UPDATE SET
-			 url=excluded.url, etag=excluded.etag, last_modified=excluded.last_modified,
-			 last_fetched=CURRENT_TIMESTAMP, last_status=excluded.last_status, last_error=excluded.last_error`,
-		source, feedURL, etag, lastModified, status, errMsg)
-	return err
+	return s.repo.PutFeedState(ctx, source, feedURL, etag, lastModified, status, errMsg)
 }
 
 // cmdFetch implements the fetch subcommand.
@@ -154,8 +140,8 @@ func cmdFetch(ctx context.Context, args []string) (any, error) {
 		f.CacheDir = dbDir // store cache alongside database
 	}
 
-	state := &dbStateStore{db: db}
-
+	repo := newFetchRepo(db)
+	state := &dbStateStore{repo: repo}
 	// Fetch all sources.
 	results, err := f.Fetch(ctx, sources, state)
 	if err != nil {
@@ -186,7 +172,7 @@ func cmdFetch(ctx context.Context, args []string) (any, error) {
 			}
 
 			// Insert with ON CONFLICT(url) DO NOTHING.
-			inserted, err := insertItem(ctx, db, item, r.Source.Name, r.Source.Tier, r.RawPath)
+			inserted, err := repo.InsertItem(ctx, item, r.Source.Name, r.Source.Tier, r.RawPath)
 			if err != nil {
 				// Log but don't fail the run — one bad insert shouldn't abort everything.
 				fmt.Fprintf(stderr, "newsops: insert %s: %v\n", item.Link, err)
@@ -199,8 +185,8 @@ func cmdFetch(ctx context.Context, args []string) (any, error) {
 	}
 
 	// End runbook.
-	c := runstate.Counts{In: seen, Out: newCount}
 	ok := true // partial fetch still advances the window
+	c := runstate.Counts{In: seen, Out: newCount}
 	if err := run.End(ctx, ok, c, ""); err != nil {
 		fmt.Fprintf(stderr, "newsops: end run: %v\n", err)
 	}
@@ -237,7 +223,7 @@ func cmdFetch(ctx context.Context, args []string) (any, error) {
 }
 
 // computeWindow determines the collection window start time.
-func computeWindow(ctx context.Context, db *store.DB, maxBackfillDays int, sinceFlag *time.Time) (time.Time, bool, error) {
+func computeWindow(ctx context.Context, db store.DB, maxBackfillDays int, sinceFlag *time.Time) (time.Time, bool, error) {
 	if sinceFlag != nil {
 		return *sinceFlag, false, nil
 	}
@@ -262,27 +248,4 @@ func computeWindow(ctx context.Context, db *store.DB, maxBackfillDays int, since
 	return windowStart, backfilled, nil
 }
 
-// insertItem inserts a parsed item into the database. Returns true if a new row was inserted.
-func insertItem(ctx context.Context, db *store.DB, item feed.ParsedItem, sourceName string, tier int, rawPath string) (bool, error) {
-	var publishedAt interface{}
-	if item.Published != nil {
-		publishedAt = item.Published.Format(time.RFC3339)
-	}
-
-	res, err := db.ExecContext(ctx,
-		`INSERT INTO items(url, canonical_url, title, source, tier, published_at, first_seen, body_hash, body_excerpt, raw_path, story_id)
-		 VALUES (?, '', ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, NULL)
-		 ON CONFLICT(url) DO NOTHING`,
-		item.Link, item.Title, sourceName, tier, publishedAt,
-		feed.BodyHash(item), feed.Excerpt(item), rawPath,
-	)
-	if err != nil {
-		return false, err
-	}
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return rows > 0, nil
-}
 

@@ -8,7 +8,7 @@ import (
 	"news-ops/internal/store"
 )
 
-func newTestDB(t *testing.T) *store.DB {
+func newTestDB(t *testing.T) *store.SQLiteDB {
 	t.Helper()
 	db, err := store.Open(context.Background(), t.TempDir(), store.ReadWrite)
 	if err != nil {

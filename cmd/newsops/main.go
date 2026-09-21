@@ -290,14 +290,6 @@ func cmdStatus(context.Context, []string) (any, error) {
 	return &ExitError{Code: 2, Slug: "not_implemented", Message: "status not yet implemented"}, nil
 }
 
-func cmdSourcesCheck(context.Context, []string) (any, error) {
-	return &ExitError{Code: 2, Slug: "not_implemented", Message: "sources:check not yet implemented"}, nil
-}
-
-
-func cmdDedupe(context.Context, []string) (any, error) {
-	return &ExitError{Code: 2, Slug: "not_implemented", Message: "dedupe not yet implemented"}, nil
-}
 
 func cmdCandidates(context.Context, []string) (any, error) {
 	return &ExitError{Code: 2, Slug: "not_implemented", Message: "candidates not yet implemented"}, nil

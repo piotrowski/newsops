@@ -179,7 +179,7 @@ func TestInsertItem_duplicateURL(t *testing.T) {
 		}(),
 	}
 
-	inserted1, err := insertItem(context.Background(), db, item, "Test", 1, "")
+	inserted1, err := newFetchRepo(db).InsertItem(context.Background(), item, "Test", 1, "")
 	if err != nil {
 		t.Fatalf("insertItem: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestInsertItem_duplicateURL(t *testing.T) {
 		t.Error("expected first insert to succeed")
 	}
 
-	inserted2, err := insertItem(context.Background(), db, item, "Test", 1, "")
+	inserted2, err := newFetchRepo(db).InsertItem(context.Background(), item, "Test", 1, "")
 	if err != nil {
 		t.Fatalf("insertItem duplicate: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestInsertItem_nullDate(t *testing.T) {
 		Published: nil,
 	}
 
-	inserted, err := insertItem(context.Background(), db, item, "Test", 1, "")
+	inserted, err := newFetchRepo(db).InsertItem(context.Background(), item, "Test", 1, "")
 	if err != nil {
 		t.Fatalf("insertItem: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestInsertItem_bodyHash(t *testing.T) {
 		}(),
 	}
 
-	inserted, err := insertItem(context.Background(), db, item, "Test", 1, "")
+	inserted, err := newFetchRepo(db).InsertItem(context.Background(), item, "Test", 1, "")
 	if err != nil {
 		t.Fatalf("insertItem: %v", err)
 	}

@@ -17,6 +17,7 @@ CREATE TABLE items (
     body_hash     TEXT NOT NULL,
     body_excerpt  TEXT,
     raw_path      TEXT,
+    comments_url  TEXT,
     story_id      INTEGER REFERENCES stories(id)
 );
 
@@ -44,7 +45,7 @@ CREATE TABLE story_sources (
     source   TEXT NOT NULL,
     url      TEXT NOT NULL,
     kind     TEXT NOT NULL CHECK(kind IN ('article','discussion')),
-    PRIMARY KEY(story_id, url)
+    PRIMARY KEY(story_id, source, url)
 );
 
 -- Append-only decision log.

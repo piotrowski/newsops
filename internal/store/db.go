@@ -18,16 +18,28 @@ const (
 	ReadOnly  Mode = iota // no lock taken
 	ReadWrite             // exclusive, non-blocking lock on data/news.lock
 )
+// DB is the shared interface for database query and execution.
+// Both *sql.DB, *sql.Tx, and *SQLiteDB implement it.
+type DB interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+// TxDB extends DB with transaction support. Only concrete providers implement it.
+type TxDB interface {
+	DB
+	Tx(ctx context.Context, fn func(*sql.Tx) error) error
+}
 
-// DB wraps *sql.DB with an optional process lock.
-type DB struct {
+// SQLiteDB wraps *sql.DB with an optional process lock.
+type SQLiteDB struct {
 	*sql.DB
 	lock *os.File // nil for read-only opens
 }
 
 // Open creates dir if needed, opens data/news.db, applies pragmas, runs
 // Migrate, and for ReadWrite takes the lock.
-func Open(ctx context.Context, dir string, mode Mode) (*DB, error) {
+func Open(ctx context.Context, dir string, mode Mode) (*SQLiteDB, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("create data directory: %w", err)
 	}
@@ -73,7 +85,7 @@ func Open(ctx context.Context, dir string, mode Mode) (*DB, error) {
 		return nil, fmt.Errorf("apply migrations: %w", err)
 	}
 
-	d := &DB{DB: sqlDB}
+	d := &SQLiteDB{DB: sqlDB}
 
 	if mode == ReadWrite {
 		lockF, err := openLock(dir)
@@ -93,7 +105,7 @@ func Open(ctx context.Context, dir string, mode Mode) (*DB, error) {
 }
 
 // Close releases the lock and closes the database.
-func (db *DB) Close() error {
+func (db *SQLiteDB) Close() error {
 	var firstErr error
 	if db.lock != nil {
 		syscall.Flock(int(db.lock.Fd()), syscall.LOCK_UN)
@@ -106,7 +118,7 @@ func (db *DB) Close() error {
 }
 
 // Tx runs fn in a transaction, rolling back on error or panic.
-func (db *DB) Tx(ctx context.Context, fn func(*sql.Tx) error) error {
+func (db *SQLiteDB) Tx(ctx context.Context, fn func(*sql.Tx) error) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
