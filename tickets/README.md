@@ -8,7 +8,9 @@ contract, both state it.
 ## Build order
 
 Tickets are numbered in dependency order. T001–T017 are Go; T018–T024 are
-markdown the agent reads.
+markdown the agent reads; T025 is the wrapper that makes it invocable.
+T026–T031 come from the post-T025 review, not from `docs/PLAN.md` — they fix
+what shipped broken and close the loops the plan left open.
 
 | # | Ticket | Size | Depends on |
 |---|---|---|---|
@@ -36,10 +38,25 @@ markdown the agent reads.
 | T022 | Voice corpus + `modes/voice.md` | M | T018 |
 | T023 | `modes/draft.md` — LinkedIn and blog | M | T022, T020 |
 | T024 | Two-week review protocol | S | T019, T020, T023 |
+| T025 | Agent packaging: skill router, invocation surface, bootstrap | M | T018–T024 |
+| T026 | Per-subcommand flag registration + flag-error contract | L | T008, T012, T014, T016, T017 |
+| T027 | Reconcile the `sources:check` command name | S | T009 |
+| T028 | `review` subcommand: make the two-week protocol runnable | M | T017, T024, T026 |
+| T029 | Close the decision loop: `posted` and `dismissed` | S | T017, T028 |
+| T030 | CI: run `make check` on every push | S | T025, T026 |
+| T031 | Bare invocation: discovery mode + undocumented `voice-guide.md` | S | T025 |
 
 **Milestones.** After T009 you can collect real data. After T017 the CLI is
 complete and drivable by hand. After T021 the daily loop works end to end.
-After T023 the system does what it was built for.
+After T023 the system does what it was built for. After T025 it starts on its
+own from a clean checkout.
+
+**The post-review milestone.** T001–T025 shipped a pipeline whose archive is
+unreachable: `query` has no working invocation, so `modes/brief.md` cannot
+find prior coverage and `modes/collect.md` cannot flag follow-ups. T026 is the
+one that makes the system do what T023 claimed it already did. Everything
+after it is feedback: T028 makes the review runnable, T029 gives it a bottom
+to the funnel, T030 keeps the whole thing from regressing unobserved.
 
 ## Shared conventions
 

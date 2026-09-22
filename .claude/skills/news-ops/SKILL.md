@@ -1,0 +1,1 @@
+../../../.agents/skills/news-ops/SKILL.md

@@ -10,3 +10,5 @@ Never publish anywhere. Drafts go to disk; the human posts them.
 Prefer the primary source over coverage of it.
 Record what happens with `newsops decide`.
 Stop at each human gate. Do not brief unasked, and do not draft unasked.
+When querying the database for story or item data, always use `newsops show <id>` via CLI.
+Never run raw SQL (sqlite3) or access `data/news.db` directly — the CLI is the only correct interface.

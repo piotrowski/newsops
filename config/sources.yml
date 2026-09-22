@@ -1,7 +1,7 @@
 sources:
-  - name: hacker-news
+  - name: hacker-news-digest
     tier: 1
-    url: https://hacker-news.firebaseio.com/v0/topstories.json
+    url: https://hnrss.org/frontpage
   - name: techmeme
     tier: 1
     url: https://www.techmeme.com/feed.xml
@@ -20,9 +20,9 @@ sources:
   - name: arxiv-cs-cr
     tier: 1
     url: http://export.arxiv.org/rss/cs.CR
-  - name: the-register
+  - name: the-next-web
     tier: 2
-    url: https://www.theregister.com/rss.xml
+    url: https://thenextweb.com/feed
   - name: ars-technica
     tier: 2
     url: https://feeds.arstechnica.com/arstechnica/technology-lab
@@ -35,27 +35,15 @@ sources:
   - name: wired
     tier: 2
     url: https://www.wired.com/feed/rss
-  - name: reuters-tech
-    tier: 2
-    url: https://www.reutersagency.com/feed/?taxonomy=na_news_type&post_type=standard&tag=tech
-  - name: bloomberg-technology
-    tier: 2
-    url: https://feeds.bloomberg.com/technology/news/rss
-  - name: theinformation
-    tier: 2
-    url: https://www.theinformation.com/feed
-  - name: venturebeat
-    tier: 2
-    url: https://venturebeat.com/feed/
   - name: engadget
     tier: 2
     url: https://www.engadget.com/rss.xml
   - name: gizmodo
     tier: 2
     url: https://gizmodo.com/rss
-  - name: cnet
+  - name: zdnet-tech
     tier: 2
-    url: https://www.cnet.com/tech/rss.xml
+    url: https://www.zdnet.com/topic/technology/rss.xml
   - name: security-week
     tier: 2
     url: https://www.securityweek.com/feed/
@@ -76,10 +64,7 @@ sources:
     url: https://stackoverflow.blog/feed/
   - name: infoq
     tier: 3
-    url: https://www.infoq.com/feed/recent-articles/
-  - name: dzone
-    tier: 3
-    url: https://dzone.com/rss/homepage
+    url: https://www.infoq.com/feed/
   - name: dev-to
     tier: 3
     url: https://dev.to/feed
@@ -95,9 +80,6 @@ sources:
   - name: openai-blog
     tier: 1
     url: https://openai.com/blog/rss.xml
-  - name: anthropic-blog
-    tier: 1
-    url: https://www.anthropic.com/rss.xml
   - name: google-ai
     tier: 1
     url: https://blog.google/technology/ai/rss/
@@ -106,49 +88,131 @@ sources:
     url: https://deepmind.google/blog/rss.xml
   - name: research-google
     tier: 2
-    url: https://research.google/pubs/rss/
+    url: https://blog.research.google/feeds/posts/default?alt=rss
   - name: huggingface-blog
     tier: 2
     url: https://huggingface.co/blog/feed.xml
-  - name: postgresql-news
-    tier: 2
-    url: https://blog.postgresql.org/feeds/posts/default
   - name: golang-blog
     tier: 1
-    url: https://go.dev/blog/feed.xml
+    url: https://go.dev/blog/feed.atom
   - name: rust-blog
     tier: 2
     url: https://blog.rust-lang.org/feed.xml
   - name: python-news
     tier: 2
-    url: https://feeds.feedburner.com/PythonInsider
-  - name: kubernetes-blog
-    tier: 2
-    url: https://kubernetes.io/blog/feed.xml
+    url: https://planet.python.org/rss20.xml
   - name: meta-engineering
     tier: 3
     url: https://engineering.fb.com/feed/
   - name: netflix-eng
     tier: 3
     url: https://netflixtechblog.com/feed
-  - name: stripe-blog
-    tier: 2
-    url: https://stripe.com/blog/rss.xml
-  - name: discord-engineering
-    tier: 3
-    url: https://discord.com/blog/category/engineering/feed
-  - name: shopify-engineering
-    tier: 3
-    url: https://shopify.engineering/feed
-  - name: google-project-zero
-    tier: 2
-    url: https://googleprojectzero.blogspot.com/feeds/posts/default
-  - name: queue-acm
-    tier: 3
-    url: https://queue.acm.org/rss.xml
   - name: linux-kernel
     tier: 2
-    url: https://www.kernel.org/feed.xml
+    url: https://lore.kernel.org/linux-kernel/atom.xml
   - name: lwn-news
     tier: 2
     url: https://lwn.net/headlines/newrss
+
+  # --- Postgres and the storage layer ---
+  - name: planet-postgresql
+    tier: 1
+    url: https://planet.postgresql.org/rss20.xml
+  - name: duckdb-blog
+    tier: 2
+    url: https://duckdb.org/feed.xml
+  - name: redis-blog
+    tier: 3
+    url: https://redis.io/blog/feed/
+
+  # --- Distributed systems, failure modes, postmortems ---
+  - name: danluu
+    tier: 2
+    url: https://danluu.com/atom.xml
+  - name: brendangregg
+    tier: 2
+    url: https://www.brendangregg.com/blog/rss.xml
+  - name: rachelbythebay
+    tier: 3
+    url: https://rachelbythebay.com/w/atom.xml
+  - name: the-register
+    tier: 2
+    url: https://www.theregister.com/headlines.atom
+  - name: stripe-blog
+    tier: 2
+    url: https://stripe.com/blog/feed.rss
+  - name: dropbox-tech
+    tier: 3
+    url: https://dropbox.tech/feed
+  - name: slack-engineering
+    tier: 3
+    url: https://slack.engineering/feed/
+  - name: discord-engineering
+    tier: 3
+    url: https://discord.com/blog/rss.xml
+  - name: shopify-engineering
+    tier: 3
+    url: https://shopify.engineering/blog.atom
+  - name: grafana-blog
+    tier: 3
+    url: https://grafana.com/blog/index.xml
+  - name: honeycomb-blog
+    tier: 3
+    url: https://www.honeycomb.io/feed
+
+  # --- LLMs in production, agent memory, eval tooling ---
+  - name: simonwillison
+    tier: 1
+    url: https://simonwillison.net/atom/everything/
+  - name: lilianweng
+    tier: 1
+    url: https://lilianweng.github.io/index.xml
+  - name: eugeneyan
+    tier: 2
+    url: https://eugeneyan.com/rss/
+  - name: huyenchip
+    tier: 2
+    url: https://huyenchip.com/feed.xml
+  - name: latent-space
+    tier: 2
+    url: https://www.latent.space/feed
+  - name: raschka-magazine
+    tier: 2
+    url: https://magazine.sebastianraschka.com/feed
+  - name: bair-berkeley
+    tier: 2
+    url: https://bair.berkeley.edu/blog/feed.xml
+  - name: microsoft-research
+    tier: 2
+    url: https://www.microsoft.com/en-us/research/feed/
+
+  # --- Developer tooling and practice ---
+  - name: jvns
+    tier: 2
+    url: https://jvns.ca/atom.xml
+  - name: martinfowler
+    tier: 2
+    url: https://martinfowler.com/feed.atom
+  - name: pythonspeed
+    tier: 3
+    url: https://pythonspeed.com/atom.xml
+  - name: kubernetes-blog
+    tier: 2
+    url: https://kubernetes.io/feed.xml
+  - name: cncf-blog
+    tier: 3
+    url: https://www.cncf.io/feed/
+  - name: hashicorp-blog
+    tier: 3
+    url: https://www.hashicorp.com/blog/feed.xml
+  - name: fly-io
+    tier: 3
+    url: https://fly.io/blog/feed.xml
+  - name: the-new-stack
+    tier: 3
+    url: https://thenewstack.io/feed/
+
+  # --- Security ---
+  - name: cisa-advisories
+    tier: 1
+    url: https://www.cisa.gov/cybersecurity-advisories/all.xml

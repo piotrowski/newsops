@@ -23,3 +23,46 @@ primary_domains:
   - shopify.engineering
   - googleprojectzero.blogspot.com
   - queue.acm.org
+
+  # Subdomains of entries above. IsPrimary (config.go:191) matches the host
+  # exactly after stripping "www.", so a parent domain does not cover these.
+  - lore.kernel.org
+  - planet.postgresql.org
+  - planet.python.org
+  - blog.research.google
+  - blog.rust-lang.org
+  - blog.google
+
+  # Postgres and the storage layer
+  - duckdb.org
+  - redis.io
+
+  # Distributed systems, failure modes, postmortems
+  - danluu.com
+  - brendangregg.com
+  - rachelbythebay.com
+  - dropbox.tech
+  - slack.engineering
+  - grafana.com
+  - honeycomb.io
+
+  # LLMs in production, agent memory, eval tooling
+  - simonwillison.net
+  - lilianweng.github.io
+  - eugeneyan.com
+  - huyenchip.com
+  - bair.berkeley.edu
+  - latent.space
+  - magazine.sebastianraschka.com
+  - microsoft.com
+
+  # Developer tooling and practice
+  - jvns.ca
+  - martinfowler.com
+  - pythonspeed.com
+  - cncf.io
+  - hashicorp.com
+  - fly.io
+
+  # Security
+  - cisa.gov

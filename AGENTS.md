@@ -2,6 +2,16 @@
 
 A personal news pipeline: the agent judges, researches, and drafts; the CLI collects and remembers; the human decides. Three sentences.
 
+## Getting started
+
+```
+make install          # builds and copies to ~/.local/bin/newsops
+export PATH=$HOME/.local/bin:$PATH   # or wherever PREFIX points
+newsops version       # verify: real version and commit, not dev/none
+```
+
+The skill router at `.agents/skills/news-ops/SKILL.md` is the entrypoint for agentic invocation. The mode table below is the contract it routes to.
+
 ## The Loop
 
 ```

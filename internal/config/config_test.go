@@ -41,8 +41,18 @@ func TestLoad_realConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load(../../config): %v", err)
 	}
-	if got := len(c.Sources); got != 51 {
-		t.Errorf("Sources: got %d, want 51", got)
+	// Deliberately not an exact count: the source list is edited routinely,
+	// and pinning it here fails the build for every legitimate config change.
+	// What matters is that the real config parses and is populated.
+	if len(c.Sources) == 0 {
+		t.Error("Sources is empty")
+	}
+	seen := make(map[string]bool, len(c.Sources))
+	for _, s := range c.Sources {
+		if seen[s.Name] {
+			t.Errorf("duplicate source name: %s", s.Name)
+		}
+		seen[s.Name] = true
 	}
 	if c.PrimaryDomains == nil {
 		t.Fatal("PrimaryDomains is nil")

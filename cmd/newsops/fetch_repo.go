@@ -52,9 +52,9 @@ func (r *sqliteFetchRepo) InsertItem(ctx context.Context, item feed.ParsedItem, 
 
 	res, err := r.db.ExecContext(ctx,
 		`INSERT INTO items(url, canonical_url, title, source, tier, published_at, first_seen, body_hash, body_excerpt, raw_path, story_id)
-		 VALUES (?, '', ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, NULL)
+		 VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, NULL)
 		 ON CONFLICT(url) DO NOTHING`,
-		item.Link, item.Title, sourceName, tier, publishedAt,
+		item.Link, item.Link, item.Title, sourceName, tier, publishedAt,
 		feed.BodyHash(item), feed.Excerpt(item), rawPath,
 	)
 	if err != nil {
