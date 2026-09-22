@@ -294,15 +294,6 @@ func humanize(v any) string {
 
 // --- stub commands (replaced by later tickets) ---
 
-
-func cmdDecide(context.Context, []string) (any, error) {
-	return &ExitError{Code: 2, Slug: "not_implemented", Message: "decide not yet implemented"}, nil
-}
-
-func cmdShow(context.Context, []string) (any, error) {
-	return &ExitError{Code: 2, Slug: "not_implemented", Message: "show not yet implemented"}, nil
-}
-
 // cmdVersion is fully implemented in this ticket.
 func cmdVersion(_ context.Context, _ []string) (any, error) {
 	return map[string]string{
