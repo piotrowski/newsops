@@ -296,10 +296,6 @@ func humanize(v any) string {
 
 
 
-func cmdCollect(context.Context, []string) (any, error) {
-	return &ExitError{Code: 2, Slug: "not_implemented", Message: "collect not yet implemented"}, nil
-}
-
 func cmdQuery(context.Context, []string) (any, error) {
 	return &ExitError{Code: 2, Slug: "not_implemented", Message: "query not yet implemented"}, nil
 }
