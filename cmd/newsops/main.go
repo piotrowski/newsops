@@ -295,11 +295,6 @@ func humanize(v any) string {
 // --- stub commands (replaced by later tickets) ---
 
 
-
-func cmdQuery(context.Context, []string) (any, error) {
-	return &ExitError{Code: 2, Slug: "not_implemented", Message: "query not yet implemented"}, nil
-}
-
 func cmdDecide(context.Context, []string) (any, error) {
 	return &ExitError{Code: 2, Slug: "not_implemented", Message: "decide not yet implemented"}, nil
 }
