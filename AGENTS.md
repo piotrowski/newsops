@@ -1,238 +1,243 @@
-# Repository Guidelines
+# News-ops — Personal News Pipeline
 
-## Project Overview
+A personal news pipeline: the agent judges, researches, and drafts; the CLI collects and remembers; the human decides. Three sentences.
 
-**news-ops** is a Go CLI tool for automated news operations — source collection, deduplication, candidate management, and digest publishing. It inverts the typical agentic workflow: the CLI handles HTTP concurrency, feed parsing, deduplication, and persistence; the agent (human or AI) handles judgment, research, and writing. Two human gates control the loop: digest selection and post approval.
-
-## Architecture & Data Flow
-
-### High-Level Structure
+## The Loop
 
 ```
-cmd/newsops/        → Cobra CLI entry point + command routing
-internal/store/     → SQLite layer (schema, migrations, DB open/close, locking)
-internal/runstate/  → Pipeline run bookkeeping (Begin/End pattern)
-internal/config/    → YAML config loading & validation
-config/             → sources.yml, domains.yml, prefilter.yml
-data/               → Runtime: news.db, news.lock (gitignored)
-tickets/            → Implementation tickets T001–T024
+newsops collect       →  ~40 candidates (deterministic, no LLM)
+    ↓  you skim and rank them
+digest.md             →  one line per candidate, with a reason
+    ↓  ── HUMAN GATE: which are worth researching? ──
+briefs/<id>-<slug>.md →  research, primary sources, archive connections
+    ↓  ── HUMAN GATE: which is worth writing about? ──
+posts/<date>-<slug>-<target>.md
+    ↓  the human edits and publishes by hand
 ```
 
-### Key Modules
+## CLI Reference
 
-| Package | Responsibility |
-|---|---|
-| `cmd/newsops` | Cobra routing, global flags (`--json`, `--db`, `--config`, `--verbose`), error envelope formatting |
-| `internal/store` | `DB` struct (embeds `*sql.DB` + optional lock file), `Open(ctx, dir, mode)`, `Tx()`, `Migrate()`, Flock-based process locking |
-| `internal/runstate` | `Begin()`/`End()` for pipeline stage bookkeeping; `LastSuccess()` returns most recent ok=1 started_at; `Stale()` wraps with maxAge check |
-| `internal/config` | `Load(dir)` reads sources.yml (required), domains.yml (required), prefilter.yml (optional → defaults); validates all fields |
+### Global Flags
 
-### Database Schema (7 tables + FTS5)
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--json` | false | Machine-readable JSON output (stdout) |
+| `--db <dir>` | `data/` | Database directory |
+| `--config <dir>` | `config/` | Configuration directory |
+| `-v, --verbose` | false | Verbose output to stderr |
 
-| Table | Purpose |
-|---|---|
-| `items` | Raw articles fetched from feeds — one row per URL, unique by url |
-| `stories` | Story clusters — one row per deduplicated news event; canonical_item_id links to items |
-| `story_sources` | All sources contributing to a story (article + discussion links) |
-| `decisions` | Append-only decision log: shown/briefed/drafted/posted/dismissed |
-| `runs` | Runbook bookkeeping — Begin/End pattern per pipeline stage |
-| `feed_state` | HTTP conditional-request state per source (ETag, Last-Modified) |
-| `schema_version` | Migration tracker |
+### Exit Codes
 
-`items_fts` is an FTS5 virtual table with external content pointing to items. Three triggers (`items_ai`, `items_ad`, `items_au`) keep the index in sync on insert/update/delete.
+| Code | Meaning | Action |
+|------|---------|--------|
+| 0 | Success or skipped | Continue |
+| 1 | Partial — some feeds failed but output is usable | **Continue** (exit 1 is not a reason to stop) |
+| 2 | Hard failure | Stop |
 
-### Data Flow Pipeline
+### `status`
 
 ```
-collect → dedupe → candidates → decide → show
+newsops status [--json]
 ```
 
-- **fetch**: Collects articles from RSS/Atom feeds, stores raw items, records ETag/Last-Modified
-- **dedupe**: Turns unassigned items into stories (URL match first, then title similarity within 48h). Creates/joins stories, inserts story_sources rows. Story IDs are never reused or renumbered.
-- **candidates**: Identifies unseen stories (shown_at IS NULL) within a time window — produces the candidate list for agent review
-- **decide**: Agent records actions on stories (append-only to decisions; shown also sets shown_at). Actions: shown, briefed, drafted, posted, dismissed
-- **show**: Displays a single story with all member items, sources, and decision history
-
-### Locking Model
-
-- `data/news.lock` uses `syscall.Flock(fd, LOCK_EX|LOCK_NB)` for exclusive process-level locking
-- `ReadOnly` mode: no lock taken — concurrent readers work via WAL
-- `ReadWrite` mode: acquires exclusive flock; writes `<pid> <RFC3339>` to the lock file for diagnostics
-- OS releases flock on process death (SIGKILL, crash) — no stale-lock cleanup needed
-- On contention, returns `*store.LockedError{PID, HeldSince}` with exit code 2
-
-### Error Envelope Format
-
-Three-tier error model. All errors produce JSON to stdout or human text to stderr:
+Shows pipeline stage freshness, item counts, and digest file info.
 
 ```json
-{"error": "<slug>", "message": "...", ...fields}
-```
-
-| Type | Slug | Source |
-|---|---|---|
-| `ExitError` | from `.Slug` field | Command returns `&ExitError{Code, Slug, Message, Fields}` as result value |
-| `LockedError` | `"locked"` | Flock contention — includes `pid`, `held_since` fields |
-| Plain error | `"internal"` | Any other error (DB, IO, parse) wrapped with Code=2 |
-
-Global flag `--json` controls output format. Without it, errors print to stderr only; stdout carries either JSON or human-readable output, never both.
-
-## Key Directories
-
-| Path | Purpose |
-|---|---|
-| `cmd/newsops/` | CLI entry point (`main.go`), tests (`main_test.go`) |
-| `internal/store/` | Database layer: schema.go (DDL), migrate.go (migrations), db.go (Open/Tx/Close), lock.go (flock) |
-| `internal/runstate/` | Pipeline runbook: runstate.go + tests |
-| `internal/config/` | Config loader: config.go + tests + testdata/ fixtures |
-| `config/` | YAML config files: sources.yml, domains.yml, prefilter.yml |
-| `tickets/` | Implementation tickets T001–T024 (T###-slug.md format) |
-| `data/` | Runtime data (gitignored): news.db, news.lock |
-
-## Development Commands
-
-```bash
-# Build static binary (no cgo required)
-CGO_ENABLED=0 go build -o newsops ./cmd/newsops/
-
-# Build with version injection
-CGO_ENABLED=0 go build -ldflags="-X main.Version=v1.0.0 -X main.Commit=abc123" -o newsops ./cmd/newsops/
-
-# Run all tests
-CGO_ENABLED=0 go test ./...
-
-# Run a specific package's tests
-CGO_ENABLED=0 go test ./internal/store/
-
-# Run with verbose output
-CGO_ENABLED=0 go test -v ./internal/runstate/
-
-# Run integration tests (requires pre-built binary)
-CGO_ENABLED=0 go test -run TestIntegration_ ./cmd/newsops/
-```
-
-## Code Conventions & Common Patterns
-
-### Error Handling
-
-- **Three-tier model**: `ExitError` (structured, from commands), `LockedError` (flock contention), plain errors (wrapped as `internal`)
-- All error wrapping uses `%w` for `errors.Is`/`errors.As` compatibility: `fmt.Errorf("open database: %w", err)`
-- Commands return `(any, error)` — structured errors come back as the result value, not the error channel
-- `exitCodeError{code int}` carries exit codes through Cobra's error path; implements `ExitCode() int`
-
-### Database Access
-
-```go
-// Open with mode (ReadOnly or ReadWrite)
-db, err := store.Open(ctx, "data/", store.ReadWrite)
-if err != nil { /* handle */ }
-defer db.Close()
-
-// Transaction with automatic rollback on error or panic
-err = db.Tx(ctx, func(tx *sql.Tx) error {
-    _, err := tx.ExecContext(ctx, "INSERT INTO ...")
-    return err
-})
-```
-
-- `store.Open()` creates data directory, opens SQLite with pragmas (WAL, FK=ON, synchronous=NORMAL, busy_timeout=5000), verifies each pragma at runtime, runs migrations, acquires flock for ReadWrite
-- `Tx()` wraps BeginTx → fn(tx) → commit on success, rollback on error; panic-safe via defer-recover that rolls back then re-panics
-
-### CLI Command Registration
-
-Commands are registered in a map and iterated to build Cobra subcommands:
-
-```go
-var commands = map[string]Command{
-    "status": cmdStatus, "fetch": cmdFetch, "dedupe": cmdDedupe,
-    // ... all subcommands
+{
+  "stages": {
+    "fetch": {"last_success": "...", "age_min": 45, "stale": false},
+    "dedupe": {"last_success": "...", "age_min": 30, "stale": false},
+    "candidates": {"last_success": null, "age_min": null, "stale": true}
+  },
+  "counts": {"items_total": 12847, "new_since_fetch": 342, "unshown_stories": 40},
+  "digest": {"path": "digest.md", "generated_at": "..."}
 }
 ```
 
-Each command signature: `func(ctx context.Context, args []string) (any, error)`
+### `sources:check`
 
-Colons in names (`sources:check`) produce nested Cobra commands (`sources check`).
-
-### Config Loading
-
-- `Load(dir string) (*Config, error)` reads three YAML files from the given directory
-- Sources validation: unique+non-empty names, tier 1..3, http/https URLs only
-- Prefilter: optional file — missing yields all defaults; partial file merges specified keys with defaults
-- `IsPrimary(rawURL string) bool` strips "www." from host and checks against PrimaryDomains set
-
-### Test Patterns
-
-| Pattern | Used In | Description |
-|---|---|---|
-| Table-driven unit tests | main_test.go, config_test.go | Slice of structs driving test cases |
-| File-backed SQLite (`t.TempDir()`) | db_test.go, runstate_test.go | Real DB for lock/WAL/concurrency testing via `store.Open()` |
-| In-memory SQLite (`:memory:`) | migrate_test.go | Schema-only testing; no filesystem concerns |
-| Binary integration tests | main_test.go | Spawns `../../newsops` binary to test CLI surface |
-| Schema golden verification | migrate_test.go | Queries `sqlite_master` for exact tables/indexes/triggers |
-| Constraint enforcement | migrate_test.go | Inserts invalid data, asserts SQL error returned |
-| Manual step tests | db_test.go | Prints PID + shell commands; documents manual verification |
-
-### Naming Conventions
-
-- Package names: lowercase, single word (`store`, `runstate`, `config`)
-- Struct fields: PascalCase with YAML tags matching snake_case keys (e.g., `CandidateLimit int yaml:"candidate_limit"`)
-- Test functions: `Test<Function>_<Scenario>` (e.g., `TestBegin_CrashedRun`, `TestLoad_validationErrors/duplicate_name`)
-
-## Important Files
-
-| File | Purpose |
-|---|---|
-| `cmd/newsops/main.go` | CLI entry point, command routing, error envelope, global flags |
-| `internal/store/schema.go` | DDL constants (V1: 6 tables + FTS5 virtual table + triggers) |
-| `internal/store/migrate.go` | Migration engine — runs DDL in transactions, records version |
-| `internal/store/db.go` | DB wrapper with Open/Close/Tx, pragma verification |
-| `internal/store/lock.go` | Flock-based process locking on news.lock |
-| `internal/runstate/runstate.go` | Pipeline runbook: Begin/End/LastSuccess/Stale |
-| `internal/config/config.go` | YAML config loader with validation and IsPrimary() |
-| `config/sources.yml` | 51 feed sources with tier 1/2/3 ratings |
-| `config/domains.yml` | Primary domains whitelist for canonical-item selection |
-| `config/prefilter.yml` | Tuning knobs: candidate_limit=40, per_source_cap=3, title_simhash_max=3, max_backfill_days=30 |
-| `go.mod` | Module: news-ops, Go 1.26, dependencies: cobra, modernc.org/sqlite, yaml.v3 |
-| `.gitignore` | Ignores data/, briefs/, posts/, digest.md, newsops binary |
-
-## Runtime & Tooling Preferences
-
-- **Go version**: 1.26 (per go.mod)
-- **Build constraint**: `CGO_ENABLED=0` — must produce static binaries with no cgo dependency
-- **Database driver**: `modernc.org/sqlite` — pure Go SQLite transpilation, no system libraries needed
-- **CLI framework**: `spf13/cobra` — subcommand routing, persistent flags, auto-completion
-- **Config format**: YAML via `gopkg.in/yaml.v3`
-- **No Makefile, no CI config, no shell scripts** — single `go build` command, agent-driven workflow
-
-## Testing & QA
-
-### Running Tests
-
-```bash
-# All packages (cmd + internal/*)
-CGO_ENABLED=0 go test ./...
-
-# Specific package
-CGO_ENABLED=0 go test ./internal/store/
-
-# Verbose output with test names
-CGO_ENABLED=0 go test -v ./internal/runstate/
+```
+newsops sources:check [--json] [--source NAME]
 ```
 
-### Coverage Summary
+Verifies all configured feeds are reachable. Returns per-source HTTP status and content type.
 
-| Package | Tests | Key Coverage Areas |
-|---|---|---|
-| `cmd/newsops` | 14 tests | Routing dispatch, exit code mapping, error envelope keys, version output, unknown command handling, stub subcommands |
-| `internal/store` (migrate) | 12 tests | All tables/indexes/triggers created, idempotent migration, rollback on failure, FTS sync (insert/update/delete), CHECK constraints, UNIQUE, FK enforcement |
-| `internal/store` (db) | 8 tests | Directory creation, lock contention (<100ms), ReadOnly under write lock, Tx rollback on error/panic, Close releases lock, concurrent readers |
-| `internal/runstate` | 10 tests | Begin/End lifecycle, failed vs success runs, crashed run handling, never-run detection, stale threshold, double-End rejection |
-| `internal/config` | 17 tests | 7 validation fixtures (duplicate name, tier 0/4, bad URL, ftp, limits), real config load (51 sources), missing/partial prefilter, IsPrimary with www stripping |
+### `fetch`
 
-**Total: 61 tests across 4 packages. All pass.**
+```
+newsops fetch [--json] [--source NAME] [--max-age DURATION] [--since RFC3339] [--no-cache]
+```
 
-### Test Data Fixtures
+Collects articles from configured RSS/Atom feeds. Gated by `--max-age` (default 6h). Records ETag/Last-Modified for conditional requests.
 
-Config validation uses `internal/config/testdata/<scenario>/` directories:
-- `duplicate_name/`, `tier_zero/`, `tier_four/`, `bad_url/`, `ftp_url/` — sources.yml + domains.yml only
-- `candidate_limit_zero/`, `title_simhash_max_65/`, `missing_prefilter/`, `partial_prefilter/` — includes prefilter.yml
+```json
+{
+  "window": {"since": "...", "backfilled": false},
+  "sources": {"total": 51, "ok": 48, "not_modified": 30, "failed": 3},
+  "items": {"seen": 1200, "new": 342, "dropped_old": 15},
+  "failures": [{"source": "Example", "error": "timeout"}]
+}
+```
+
+### `dedupe`
+
+```
+newsops dedupe [--json] [--window DURATION] [--limit N]
+```
+
+Assigns unassigned items to stories (URL match first, then title similarity). Creates/joins stories, inserts story_sources rows.
+
+```json
+{
+  "items_in": 342,
+  "stories_created": 28,
+  "stories_updated": 15,
+  "methods": {"url": 20, "title": 8},
+  "discussions_linked": 12
+}
+```
+
+### `candidates`
+
+```
+newsops candidates [--json] [--since RFC3339] [--include-shown] [--limit N]
+```
+
+Prefilters stories: window → drop shown → drop excluded terms → order by tier/source_count/last_seen/id → per-source cap → limit. Returns presentation-order candidate list.
+
+```json
+{
+  "generated_at": "...",
+  "window": {"since": "...", "days": 1},
+  "total_in_window": 231,
+  "returned": 40,
+  "dropped": {"shown": 158, "excluded": 4, "source_cap": 29},
+  "candidates": [
+    {
+      "story_id": 4213,
+      "title": "...",
+      "url": "...",
+      "source": "Cloudflare",
+      "tier": 1,
+      "source_count": 4,
+      "sources": ["Cloudflare", "Hacker News"],
+      "published_at": "...",
+      "primary": true,
+      "excerpt": "..."
+    }
+  ]
+}
+```
+
+### `collect`
+
+```
+newsops collect [--json] [--max-age DURATION] [--limit N]
+```
+
+Chained fetch → dedupe → candidates. Each stage runs if its last success is older than `--max-age` OR it has pending input (unassigned items for dedupe, unshown stories for candidates). Exit-code propagation: continue past 1, abort on 2. Takes write lock once.
+
+```json
+{
+  "exit": 0,
+  "stages": {
+    "fetch": {"ran": true, "skipped": false, "result": {...}},
+    "dedupe": {"ran": true, "skipped": false, "result": {...}},
+    "candidates": {"ran": true, "skipped": false, "result": {...}}
+  },
+  "candidates": [...]
+}
+```
+
+### `query`
+
+```
+newsops query [--json] [--text "..."] [--domain example.com] [--story N --related] [--days 90] [--limit 20]
+```
+
+FTS5 archive search. At least one of `--text`, `--domain`, or `--story --related` required. Results are stories ranked by FTS5 rank with `<b>`-delimited snippets.
+
+```json
+{
+  "query": {"text": "cloudflare outage", "days": 90, "limit": 20},
+  "total": 7,
+  "results": [
+    {
+      "story_id": 3907,
+      "title": "...",
+      "url": "...",
+      "source": "Cloudflare",
+      "published_at": "...",
+      "first_seen": "...",
+      "source_count": 6,
+      "snippet": "...<b>outage</b>..."
+    }
+  ]
+}
+```
+
+### `decide`
+
+```
+newsops decide <story_ids> <action> [--note "..."]
+```
+
+Records actions on stories (shown/briefed/drafted/posted/dismissed). Appends decisions rows. `shown` sets `stories.shown_at` only if currently null. Validates all IDs before writing — exits 2 with no changes if any ID is unknown.
+
+```json
+{
+  "action": "shown",
+  "applied": [4213, 4198],
+  "already_shown": [4155],
+  "unknown": []
+}
+```
+
+### `show`
+
+```
+newsops show <story_id> [--json]
+```
+
+Displays a single story: story row, all member items, all story_sources, and full decision history.
+
+```json
+{
+  "story": {"id": 4213, "source_count": 4, "method": "url", "first_seen": "...", "last_seen": "...", "shown_at": "..."},
+  "canonical": {"item_id": 88213, "title": "...", "url": "...", "source": "Cloudflare", "tier": 1, "published_at": "...", "excerpt": "..."},
+  "items": [...],
+  "sources": [{"source": "Hacker News", "url": "...", "kind": "discussion"}],
+  "decisions": [{"action": "shown", "note": "rank=1", "at": "..."}]
+}
+```
+
+### `version`
+
+```
+newsops version [--json]
+```
+
+Shows build version and commit hash.
+
+## Where Things Live
+
+| Path | Purpose |
+|------|---------|
+| `config/` | sources.yml, domains.yml, prefilter.yml |
+| `context/` | interests.md, beats.md, voice/ corpus |
+| `modes/` | collect.md, brief.md, draft.md, voice.md, _shared.md |
+| `briefs/` | Research briefs: `<id>-<slug>.md` |
+| `posts/` | Draft posts: `<date>-<slug>-<target>.md` |
+| `data/` | Runtime: news.db, news.lock (gitignored) |
+| `digest.md` | Daily digest output |
+
+## Which Mode to Load
+
+| Task | Mode file |
+|------|-----------|
+| Collect/digest | `modes/collect.md` |
+| Research/brief | `modes/brief.md` |
+| Draft post | `modes/draft.md` |
+| Voice corpus | `modes/voice.md` |
+
+Always read `modes/_shared.md` first.
