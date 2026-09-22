@@ -65,7 +65,12 @@ var (
 	fetchSource   string
 	fetchMaxAge   time.Duration
 	fetchSince    string
-	fetchNoCache  bool
+	fetchNoCache       bool
+
+	// candidates-specific flags (filled by cobra).
+	candidatesSince        string
+	candidatesIncludeShown bool
+	candidatesLimit        int
 )
 
 
@@ -105,6 +110,9 @@ Global flags:
 	root.PersistentFlags().DurationVar(&fetchMaxAge, "max-age", 0, "skip if last success is fresher than this duration (e.g. 6h)")
 	root.PersistentFlags().StringVar(&fetchSince, "since", "", "override fetch window start with RFC3339 time")
 	root.PersistentFlags().BoolVar(&fetchNoCache, "no-cache", false, "skip raw-body writes during fetch")
+	root.PersistentFlags().StringVar(&candidatesSince, "candidates-since", "", "override window start with RFC3339 time")
+	root.PersistentFlags().BoolVar(&candidatesIncludeShown, "include-shown", false, "include already-shown stories")
+	root.PersistentFlags().IntVar(&candidatesLimit, "limit", 0, "override candidate limit (0 = use config default)")
 
 	// Build subcommands from the routing table.
 	for name, fn := range commands {
@@ -287,10 +295,6 @@ func humanize(v any) string {
 // --- stub commands (replaced by later tickets) ---
 
 
-
-func cmdCandidates(context.Context, []string) (any, error) {
-	return &ExitError{Code: 2, Slug: "not_implemented", Message: "candidates not yet implemented"}, nil
-}
 
 func cmdCollect(context.Context, []string) (any, error) {
 	return &ExitError{Code: 2, Slug: "not_implemented", Message: "collect not yet implemented"}, nil
