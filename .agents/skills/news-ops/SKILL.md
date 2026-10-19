@@ -7,7 +7,7 @@ description: >-
   any news-ops mode.
 arguments: mode
 user_invocable: true
-argument-hint: "[collect | brief <id> | draft <id> --linkedin|--blog | voice | status]"
+argument-hint: "[collect | brief <id> | draft <id> --linkedin|--blog | voice | status | posted <id> [url]]"
 ---
 
 ## Project root resolution
@@ -22,12 +22,19 @@ Prefer `newsops` on `PATH`; fall back to `$PROJECT_ROOT/newsops`. If neither exi
 
 | Input | Mode |
 |---|---|
-| (empty) | `modes/collect.md` |
+| (empty) | discovery: list the rows of this table with one clause each, run `newsops status --json`, report it, stop. Touch nothing else: no fetch, no `digest.md`, no `decide`. |
 | `collect`, `digest`, `news` | `modes/collect.md` |
 | `brief <id>` | `modes/brief.md` |
 | `draft <id> [--linkedin|--blog]` | `modes/draft.md` |
 | `voice` | `modes/voice.md` |
 | `status` | run `newsops status --json`, report, stop |
+| `posted <id> [url]` | run `newsops decide <id> posted --note "<url or empty>" --json`, confirm, stop. The human publishes by hand; this only records that they did. |
+
+## Related skills
+
+- Running or reading any `newsops` command directly: `newsops-cli`.
+- A feed failing, a stage stale, a `locked` error, or editing `config/`: `newsops-sources`.
+- Changing the Go code: `newsops-dev`.
 
 ## Procedure
 

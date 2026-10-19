@@ -22,4 +22,4 @@ draft <id> --linkedin →  draft at posts/<date>-<slug>-linkedin.md
 
 The skill router at `.agents/skills/news-ops/SKILL.md` is the entrypoint for agentic invocation. Read `AGENTS.md` for the full CLI reference, mode definitions, and workflow details.
 
-Run `make skills` after cloning to create harness symlinks. If your checkout landed symlinks as plain files (git `core.symlinks` is false), `make skills` repairs them.
+Run `make skills` after cloning to create harness symlinks: every directory under `.agents/skills/` is linked as a directory into `.claude/skills/`, `.cursor/skills/` and `.opencode/skills/`. If your checkout landed symlinks as plain files or directories (git `core.symlinks` is false), `make skills` repairs them.

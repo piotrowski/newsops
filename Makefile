@@ -12,13 +12,18 @@ install: build
 	mkdir -p $(PREFIX)/bin
 	cp newsops $(PREFIX)/bin/
 
+# Every directory under .agents/skills/ is one skill (a real SKILL.md). Each
+# harness gets a directory symlink per skill, never a copy. Idempotent, and
+# repairs a checkout where the links landed as plain files or directories.
 skills:
-	mkdir -p .agents/skills/news-ops
 	@for harness in $(HARNESSES); do \
-		target=$$harness/skills/news-ops; \
-		mkdir -p "$$target"; \
-		rm -f "$$target/SKILL.md"; \
-		ln -s ../../../.agents/skills/news-ops/SKILL.md "$$target/SKILL.md"; \
+		mkdir -p "$$harness/skills"; \
+		for dir in .agents/skills/*/; do \
+			name=$$(basename "$$dir"); \
+			target="$$harness/skills/$$name"; \
+			rm -rf "$$target"; \
+			ln -s "../../.agents/skills/$$name" "$$target"; \
+		done; \
 	done
 
 test:
@@ -33,10 +38,14 @@ check: build test e2e skills
 	@for f in $$(grep -o 'modes/[a-z_]*\.md' .agents/skills/news-ops/SKILL.md); do \
 		test -f "$$f" || { echo "missing: $$f"; exit 1; }; \
 	done
-	@for harness in $(HARNESSES); do \
-		target=$$harness/skills/news-ops/SKILL.md; \
-		[ -L "$$target" ] || { echo "not a symlink: $$target"; exit 1; }; \
-		[ -e "$$target" ] || { echo "broken symlink: $$target -> $$(readlink "$$target")"; exit 1; }; \
+	@for dir in .agents/skills/*/; do \
+		name=$$(basename "$$dir"); \
+		test -f "$$dir/SKILL.md" || { echo "missing: $$dir/SKILL.md"; exit 1; }; \
+		for harness in $(HARNESSES); do \
+			target=$$harness/skills/$$name; \
+			[ -L "$$target" ] || { echo "not a symlink: $$target"; exit 1; }; \
+			[ -f "$$target/SKILL.md" ] || { echo "broken symlink: $$target -> $$(readlink "$$target")"; exit 1; }; \
+		done; \
 	done
 
 # Network reachability of the feed list. Separate from check: feeds rot

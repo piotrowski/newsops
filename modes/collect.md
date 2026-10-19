@@ -11,6 +11,9 @@
 5. Rank. Write `digest.md`.
 6. `newsops decide <all candidate ids> shown --note "rank=<n>"` — one call
    with a comma-separated list, the note carrying each story's rank.
+   Then, in a second batched call, record the stories you omitted or ranked
+   below the digest cut: `newsops decide <ids> dismissed --note "<one-clause
+   reason>"`. Group IDs that share a reason into one call.
 7. **Stop.** Report the top few in the conversation and ask which are worth
    briefing. Do not brief anything unasked.
 
@@ -43,3 +46,7 @@ an entry without one is a failed entry.
   say so in the reason line rather than guessing.
 - Write the whole digest even when many candidates are dull — omitting them
   silently hides that the source list needs work.
+- A `dismissed` note is one clause, drawn from the same judgment as the reason
+  line, never speculative ("funding round, on the avoid list"; "duplicate of
+  4213"). Forty paragraphs of justification turn the skim into a research
+  session.

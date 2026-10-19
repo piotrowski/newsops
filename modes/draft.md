@@ -10,6 +10,9 @@
 4. `newsops decide <story_id> drafted`.
 5. Report the draft in the conversation and say plainly that it is a starting
    point.
+6. Tell the human that once they publish, `newsops decide <story_id> posted
+   --note "<published url>"` closes the loop. Never run it yourself: at draft
+   time nothing has been posted.
 
 ### --linkedin
 
