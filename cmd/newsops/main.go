@@ -3,13 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
-	"news-ops/internal/store"
 	"github.com/spf13/cobra"
+	"news-ops/internal/store"
 )
 
 // Version and Commit are injected at build time via -ldflags.
@@ -23,10 +24,10 @@ type Command func(ctx context.Context, args []string) (any, error)
 
 // ExitError carries an explicit exit code and machine-readable slug.
 type ExitError struct {
-	Code    int              `json:"-"`
-	Slug    string           `json:"error"`
-	Message string           `json:"message"`
-	Fields  map[string]any   `json:"-"`
+	Code    int            `json:"-"`
+	Slug    string         `json:"error"`
+	Message string         `json:"message"`
+	Fields  map[string]any `json:"-"`
 }
 
 func (e ExitError) Error() string { return e.Message }
@@ -52,32 +53,81 @@ var commands = map[string]Command{
 	"version":       cmdVersion,
 }
 
-// --- global state (filled by persistent pre-run) ---
+// --- global state (filled by cobra flag binding) ---
 
 var (
-	jsonOut   bool
-	dbDir     string
-	configDir string
-	verbose   bool
-	stderr    = os.Stderr
+	jsonOut    bool
+	dbDir      string
+	configDir  string
+	digestPath string
+	verbose    bool
+	stderr     = os.Stderr
 
-	// fetch-specific flags (filled by cobra).
-	fetchSource   string
-	fetchMaxAge   time.Duration
-	fetchSince    string
-	fetchNoCache       bool
+	// fetch / collect flags.
+	fetchSource  string
+	fetchMaxAge  time.Duration
+	fetchSince   string
+	fetchNoCache bool
 
-	// candidates-specific flags (filled by cobra).
+	// collect flags. Separate from fetchMaxAge because the two commands have
+	// different defaults and cobra applies a default at registration time.
+	collectMaxAge time.Duration
+
+	// candidates / collect flags.
 	candidatesSince        string
 	candidatesIncludeShown bool
 	candidatesLimit        int
 )
 
+// commandFlags registers the subcommand-specific flags. Commands absent from
+// this table take only the global flags.
+var commandFlags = map[string]func(*cobra.Command){
+	"sources:check": func(c *cobra.Command) {
+		c.Flags().StringVar(&fetchSource, "source", "", "check one source by name")
+	},
+	"fetch": func(c *cobra.Command) {
+		c.Flags().StringVar(&fetchSource, "source", "", "restrict fetch to one source by name")
+		c.Flags().DurationVar(&fetchMaxAge, "max-age", 0, "skip if last success is fresher than this duration (e.g. 6h)")
+		c.Flags().StringVar(&fetchSince, "since", "", "override fetch window start with RFC3339 time")
+		c.Flags().BoolVar(&fetchNoCache, "no-cache", false, "skip raw-body writes during fetch")
+	},
+	"dedupe": func(c *cobra.Command) {
+		c.Flags().DurationVar(&dedupeWindow, "window", 48*time.Hour, "title-match time window")
+		c.Flags().IntVar(&dedupeLimit, "limit", 0, "cap how many unassigned items to process (0 = unlimited)")
+	},
+	"candidates": func(c *cobra.Command) {
+		c.Flags().StringVar(&candidatesSince, "since", "", "override window start with RFC3339 time")
+		c.Flags().BoolVar(&candidatesIncludeShown, "include-shown", false, "include already-shown stories")
+		c.Flags().IntVar(&candidatesLimit, "limit", 0, "override candidate limit (0 = use config default)")
+	},
+	"collect": func(c *cobra.Command) {
+		c.Flags().DurationVar(&collectMaxAge, "max-age", 6*time.Hour, "re-run a stage only if its last success is older than this")
+		c.Flags().IntVar(&candidatesLimit, "limit", 0, "override candidate limit (0 = use config default)")
+		c.Flags().StringVar(&fetchSource, "source", "", "restrict fetch to one source by name")
+		c.Flags().BoolVar(&fetchNoCache, "no-cache", false, "skip raw-body writes during fetch")
+	},
+	"query": func(c *cobra.Command) {
+		c.Flags().StringVar(&queryText, "text", "", "full-text search terms")
+		c.Flags().StringVar(&queryDomain, "domain", "", "restrict to a source name or URL host")
+		c.Flags().Int64Var(&queryStoryID, "story", 0, "story ID for --related")
+		c.Flags().BoolVar(&queryRelated, "related", false, "find stories related to --story")
+		c.Flags().IntVar(&queryDays, "days", 90, "look back this many days")
+		c.Flags().IntVar(&queryLimit, "limit", 20, "maximum results")
+	},
+	"decide": func(c *cobra.Command) {
+		c.Flags().StringVar(&decideNote, "note", "", "free-text note stored with the decision")
+	},
+}
+
+// exitCoder is implemented by results that carry their own exit code while
+// still being printed as a normal (non-error) payload. collect uses it: the
+// JSON is usable but exit 1 signals a partial fetch.
+type exitCoder interface{ ExitCode() int }
 
 func main() {
 	root := &cobra.Command{
-		Use:           "newsops <command>",
-		Short:         "News-ops CLI — source collection, deduplication, and publishing",
+		Use:   "newsops <command>",
+		Short: "News-ops CLI — source collection, deduplication, and publishing",
 		Long: `newsops is a command-line tool for news operations.
 
 Subcommands:
@@ -96,48 +146,40 @@ Global flags:
   --json            Output machine-readable JSON
   --db <dir>        Database directory (default "data/")
   --config <dir>    Configuration directory (default "config/")
+  --digest <path>   Digest file reported by status (default "digest.md")
   --verbose         Print diagnostic messages to stderr`,
 		SilenceErrors: true,
 		SilenceUsage:  true,
+		// Flags but no subcommand: usage, exit 2 (same as no args at all).
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cmd.Usage()
+			return exitCodeError{code: 2}
+		},
 	}
 
-	// Global flags on root command.
+	// Global flags on root command; subcommands inherit them.
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "machine-readable JSON output")
 	root.PersistentFlags().StringVar(&dbDir, "db", "data/", "database directory")
 	root.PersistentFlags().StringVar(&configDir, "config", "config/", "configuration directory")
+	root.PersistentFlags().StringVar(&digestPath, "digest", "digest.md", "digest file path (reported by status)")
 	root.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output to stderr")
-	root.PersistentFlags().StringVar(&fetchSource, "source", "", "restrict fetch to one source by name")
-	root.PersistentFlags().DurationVar(&fetchMaxAge, "max-age", 0, "skip if last success is fresher than this duration (e.g. 6h)")
-	root.PersistentFlags().StringVar(&fetchSince, "since", "", "override fetch window start with RFC3339 time")
-	root.PersistentFlags().BoolVar(&fetchNoCache, "no-cache", false, "skip raw-body writes during fetch")
-	root.PersistentFlags().StringVar(&candidatesSince, "candidates-since", "", "override window start with RFC3339 time")
-	root.PersistentFlags().BoolVar(&candidatesIncludeShown, "include-shown", false, "include already-shown stories")
-	root.PersistentFlags().IntVar(&candidatesLimit, "limit", 0, "override candidate limit (0 = use config default)")
 
 	// Build subcommands from the routing table.
 	for name, fn := range commands {
-		nameParts := splitCommand(name)
 		sub := &cobra.Command{
-			Use:   nameParts[0] + spaceOrEmpty(nameParts[1]),
+			Use:   name,
 			Short: commandSummary(name),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				return runCommand(root.Context(), fn, args)
+				return runCommand(cmd.Context(), fn, args)
 			},
 		}
-		// Every subcommand inherits global flags.
-		sub.PersistentFlags().BoolVar(&jsonOut, "json", false, "")
-		sub.PersistentFlags().StringVar(&dbDir, "db", "data/", "")
-		sub.PersistentFlags().StringVar(&configDir, "config", "config/", "")
-		sub.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "")
+		if reg, ok := commandFlags[name]; ok {
+			reg(sub)
+		}
 		root.AddCommand(sub)
 	}
-	// unknown subcommands.
-	if err := root.ParseFlags(os.Args[1:]); err != nil {
-		fmt.Fprintln(stderr, "flag error:", err)
-		os.Exit(2)
-	}
 
-	// No subcommand given — print usage before cobra runs.
+	// No subcommand given — print usage.
 	if len(os.Args) < 2 {
 		root.Usage()
 		os.Exit(2)
@@ -148,18 +190,29 @@ Global flags:
 		if e, ok := err.(interface{ ExitCode() int }); ok {
 			os.Exit(e.ExitCode())
 		}
-		// Cobra's "unknown command" → our envelope.
+		slug := "invalid_argument"
 		if strings.Contains(err.Error(), "unknown command") {
-			envelope := buildEnvelope("unknown_command", fmt.Sprintf("Unknown command %q", os.Args[1]), nil)
-			if jsonOut {
-				fmt.Fprintln(os.Stdout, mustMarshal(envelope))
-			} else {
-				fmt.Fprintf(stderr, "error: unknown_command — %s\n", err)
-			}
-			os.Exit(2)
+			slug = "unknown_command"
+		}
+		envelope := buildEnvelope(slug, err.Error(), nil)
+		if jsonOut || hasJSONFlag(os.Args[1:]) {
+			fmt.Fprintln(os.Stdout, mustMarshal(envelope))
+		} else {
+			fmt.Fprintf(stderr, "error: %s — %s\n", slug, err)
 		}
 		os.Exit(2)
 	}
+}
+
+// hasJSONFlag reports whether --json appears in args. Flag parsing may have
+// aborted before binding jsonOut, so the error path checks the raw args.
+func hasJSONFlag(args []string) bool {
+	for _, a := range args {
+		if a == "--json" || a == "--json=true" {
+			return true
+		}
+	}
+	return false
 }
 
 // runCommand executes a Command and handles output formatting.
@@ -170,12 +223,19 @@ func runCommand(ctx context.Context, fn Command, args []string) error {
 		return handleExitError(exitErr)
 	}
 	if err != nil {
-		if lockErr, ok := err.(*store.LockedError); ok {
+		var lockErr *store.LockedError
+		if errors.As(err, &lockErr) {
 			return handleLockedError(lockErr)
 		}
 		return handleError(err)
 	}
-	return outputJSON(result)
+	if err := outputJSON(result); err != nil {
+		return err
+	}
+	if ec, ok := result.(exitCoder); ok && ec.ExitCode() != 0 {
+		return exitCodeError{code: ec.ExitCode()}
+	}
+	return nil
 }
 
 // handleExitError prints the envelope and returns a wrapped error.
@@ -188,6 +248,7 @@ func handleExitError(e *ExitError) error {
 	}
 	return exitCodeError{code: e.Code}
 }
+
 // handleLockedError prints the locked envelope and returns an exit code.
 func handleLockedError(e *store.LockedError) error {
 	fields := map[string]any{
@@ -245,24 +306,6 @@ func mustMarshal(v any) string {
 		os.Exit(2)
 	}
 	return string(b)
-}
-
-// splitCommand splits "foo:bar" into ["foo", "bar"].
-// Single-name commands like "status" return ["status", ""].
-func splitCommand(name string) []string {
-	for i, c := range name {
-		if c == ':' {
-			return []string{name[:i], name[i+1:]}
-		}
-	}
-	return []string{name, ""}
-}
-
-func spaceOrEmpty(s string) string {
-	if s == "" {
-		return ""
-	}
-	return " " + s
 }
 
 func commandSummary(name string) string {

@@ -34,9 +34,22 @@ type AssignResult struct {
 	DiscussionsLinked int            `json:"discussions_linked"`
 }
 
+// Options tunes an Assign pass.
+type Options struct {
+	Window time.Duration // title-match window; 0 means 48h
+	Limit  int           // max unassigned items to process; 0 means all
+}
+
+// DefaultWindow is the title-match window used when Options.Window is zero.
+const DefaultWindow = 48 * time.Hour
+
 // Assign processes all items with story_id IS NULL, assigning them to stories.
-func Assign(ctx context.Context, db store.TxDB, cfg *config.Config) (*AssignResult, error) {
-	const window = 48 * time.Hour
+// It records its own runs row and runs inside a single transaction.
+func Assign(ctx context.Context, db store.TxDB, cfg *config.Config, opts Options) (*AssignResult, error) {
+	window := opts.Window
+	if window <= 0 {
+		window = DefaultWindow
+	}
 
 	run, err := runstate.Begin(ctx, db, runstate.StageDedupe)
 	if err != nil {
@@ -62,6 +75,10 @@ func Assign(ctx context.Context, db store.TxDB, cfg *config.Config) (*AssignResu
 		items, err := repo.ListUnassigned(ctx)
 		if err != nil {
 			return fmt.Errorf("list unassigned: %w", err)
+		}
+		if opts.Limit > 0 && len(items) > opts.Limit {
+			items = items[:opts.Limit]
+			result.ItemsIn = len(items)
 		}
 
 		var sourceNames []string
@@ -92,6 +109,7 @@ func Assign(ctx context.Context, db store.TxDB, cfg *config.Config) (*AssignResu
 			// Layer 1 — URL match.
 			storyID := urlMatch(sm, canonicalURL)
 			if storyID > 0 {
+				result.Methods["url"]++
 				repo.InsertArticleSource(ctx, storyID, item.Source, canonicalURL)
 				repo.AssignItemToStory(ctx, item.ID, storyID)
 				if discussionLink != nil && discussionLink.URL != "" {
@@ -106,9 +124,12 @@ func Assign(ctx context.Context, db store.TxDB, cfg *config.Config) (*AssignResu
 			// Layer 2 — Title match.
 			storyID = titleMatch(ctx, repo, cfg, sm, item.Title, item.FirstSeen, window, sourceNames)
 			if storyID > 0 {
+				result.Methods["title"]++
 				si := sm.stories[storyID]
 				if si.Method == "url" {
 					_ = repo.UpdateStoryMethod(ctx, storyID, "title")
+					si.Method = "title"
+					sm.stories[storyID] = si
 				}
 				repo.InsertArticleSource(ctx, storyID, item.Source, canonicalURL)
 				repo.AssignItemToStory(ctx, item.ID, storyID)
@@ -131,7 +152,6 @@ func Assign(ctx context.Context, db store.TxDB, cfg *config.Config) (*AssignResu
 			sm.stories[storyID] = storyInfo{ID: storyID, CanonicalID: item.ID, Method: "url", LastSeen: createdTime}
 
 			result.StoriesCreated++
-			result.Methods["url"]++
 			repo.InsertArticleSource(ctx, storyID, item.Source, canonicalURL)
 			repo.AssignItemToStory(ctx, item.ID, storyID)
 			if discussionLink != nil && discussionLink.URL != "" {
@@ -223,24 +243,6 @@ func recomputeStory(ctx context.Context, repo Repo, cfg *config.Config, storyID 
 }
 
 func parseTime(s string) (time.Time, error) {
-	for _, layout := range []string{
-		time.RFC3339,
-		"2006-01-02T15:04:05Z",
-		"2006-01-02 15:04:05",
-		"2006-01-02T15:04:05",
-	} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t, nil
-		}
-	}
-	return time.Time{}, fmt.Errorf("unrecognized time format: %q", s)
+	return store.ParseTime(s)
 }
 
-// CmdDedupe is the entry point for the "dedupe" subcommand.
-func CmdDedupe(ctx context.Context, db store.TxDB, cfg *config.Config) (any, error) {
-	result, err := Assign(ctx, db, cfg)
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
-}

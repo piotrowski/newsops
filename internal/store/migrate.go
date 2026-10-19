@@ -15,6 +15,7 @@ type migration struct {
 // migrations is the ordered list of all migrations.
 var migrations = []migration{
 	{1, schemaV1},
+	{2, schemaV2},
 }
 
 // Migrate applies every migration above the recorded version, each inside its

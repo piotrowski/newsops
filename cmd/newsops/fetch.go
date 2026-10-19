@@ -184,10 +184,16 @@ func cmdFetch(ctx context.Context, args []string) (any, error) {
 		}
 	}
 
-	// End runbook.
-	ok := true // partial fetch still advances the window
+	// End runbook. A partial fetch still advances the window, but a run in
+	// which every source failed must not: otherwise the next fetch would
+	// treat everything published during the outage as old and drop it.
+	ok := okSources > 0
+	note := ""
+	if !ok {
+		note = "all sources failed"
+	}
 	c := runstate.Counts{In: seen, Out: newCount}
-	if err := run.End(ctx, ok, c, ""); err != nil {
+	if err := run.End(ctx, ok, c, note); err != nil {
 		fmt.Fprintf(stderr, "newsops: end run: %v\n", err)
 	}
 
@@ -216,7 +222,7 @@ func cmdFetch(ctx context.Context, args []string) (any, error) {
 	}
 
 	return &fetchResult{
-		Window: windowInfo{Since: windowStart.Format(time.RFC3339), Backfilled: backfilled},
+		Window: windowInfo{Since: windowStart.UTC().Format(time.RFC3339), Backfilled: backfilled},
 		Sources: sourceCounts{Total: totalSources, OK: okSources, NotModified: notModifiedCount, Failed: failedCount},
 		Items:   itemCounts{Seen: seen, New: newCount, DroppedOld: droppedOld},
 	}, nil

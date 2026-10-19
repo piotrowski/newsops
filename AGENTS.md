@@ -8,6 +8,8 @@ A personal news pipeline: the agent judges, researches, and drafts; the CLI coll
 make install          # builds and copies to ~/.local/bin/newsops
 export PATH=$HOME/.local/bin:$PATH   # or wherever PREFIX points
 newsops version       # verify: real version and commit, not dev/none
+make test             # unit tests
+make e2e              # end-to-end: every subcommand against local fixture feeds (no network)
 ```
 
 The skill router at `.agents/skills/news-ops/SKILL.md` is the entrypoint for agentic invocation. The mode table below is the contract it routes to.
@@ -34,6 +36,7 @@ posts/<date>-<slug>-<target>.md
 | `--json` | false | Machine-readable JSON output (stdout) |
 | `--db <dir>` | `data/` | Database directory |
 | `--config <dir>` | `config/` | Configuration directory |
+| `--digest <path>` | `digest.md` | Digest file whose mtime `status` reports |
 | `-v, --verbose` | false | Verbose output to stderr |
 
 ### Exit Codes
@@ -113,7 +116,7 @@ Assigns unassigned items to stories (URL match first, then title similarity). Cr
 newsops candidates [--json] [--since RFC3339] [--include-shown] [--limit N]
 ```
 
-Prefilters stories: window → drop shown → drop excluded terms → order by tier/source_count/last_seen/id → per-source cap → limit. Returns presentation-order candidate list.
+Prefilters stories: window → drop shown → drop excluded terms → order by tier/source_count/last_seen/id → per-source cap → limit. Returns presentation-order candidate list. Records a `candidates` run row, so it takes the write lock briefly.
 
 ```json
 {
@@ -192,7 +195,7 @@ FTS5 archive search. At least one of `--text`, `--domain`, or `--story --related
 newsops decide <story_ids> <action> [--note "..."]
 ```
 
-Records actions on stories (shown/briefed/drafted/posted/dismissed). Appends decisions rows. `shown` sets `stories.shown_at` only if currently null. Validates all IDs before writing — exits 2 with no changes if any ID is unknown.
+Records actions on stories (shown/briefed/drafted/posted/dismissed). Story IDs may be space-separated or one comma-separated list (`decide 4213,4198 shown`). Appends decisions rows. `shown` sets `stories.shown_at` only if currently null. Validates all IDs before writing — exits 2 with no changes if any ID is unknown.
 
 ```json
 {

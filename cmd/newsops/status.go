@@ -46,9 +46,9 @@ func cmdStatus(ctx context.Context, args []string) (any, error) {
 		Digest: digestInfo{Path: "digest.md"},
 	}
 
-	// Check for digest.md in configDir.
-	if configDir != "" {
-		digestPath := filepath.Join(configDir, "digest.md")
+	// Report the digest file's mtime, if it exists.
+	if digestPath != "" {
+		result.Digest.Path = digestPath
 		if fi, err := os.Stat(digestPath); err == nil {
 			t := fi.ModTime().UTC().Format(time.RFC3339)
 			result.Digest.GeneratedAt = &t
@@ -121,7 +121,7 @@ func cmdStatus(ctx context.Context, args []string) (any, error) {
 		var newCount int
 		err = db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM items WHERE first_seen >= ?`,
-			fetchLastTime.UTC().Format(time.RFC3339)).Scan(&newCount)
+			store.FormatTime(fetchLastTime)).Scan(&newCount)
 		if err != nil {
 			return nil, fmt.Errorf("count new since fetch: %w", err)
 		}
@@ -131,10 +131,10 @@ func cmdStatus(ctx context.Context, args []string) (any, error) {
 	// unshown_stories: shown_at IS NULL and last_seen within 7 days.
 	var sevenDaysAgo string
 	if found {
-		sevenDaysAgo = fetchLastTime.Add(-7 * 24 * time.Hour).UTC().Format(time.RFC3339)
+		sevenDaysAgo = store.FormatTime(fetchLastTime.Add(-7 * 24 * time.Hour))
 	} else {
 		// No fetch has ever succeeded — nothing can be new, so use epoch.
-		sevenDaysAgo = "0001-01-01T00:00:00Z"
+		sevenDaysAgo = store.FormatTime(time.Time{})
 	}
 
 	err = db.QueryRowContext(ctx,

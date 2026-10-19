@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
@@ -17,7 +16,6 @@ import (
 	"news-ops/internal/store"
 )
 
-
 // stageOutput holds one stage's result within the collect output.
 type stageOutput struct {
 	Ran     bool   `json:"ran"`
@@ -28,15 +26,18 @@ type stageOutput struct {
 
 // collectResult is the JSON output from the collect subcommand.
 type collectResult struct {
-	Exit       int                        `json:"exit"`
-	Stages     map[string]stageOutput     `json:"stages"`
-	Candidates []candidates.Candidate     `json:"candidates"`
+	Exit       int                    `json:"exit"`
+	Stages     map[string]stageOutput `json:"stages"`
+	Candidates []candidates.Candidate `json:"candidates"`
 }
 
+// ExitCode makes the process exit status follow the "exit" field: 1 for a
+// partial fetch whose output is still usable, 2 for a hard failure.
+func (r *collectResult) ExitCode() int { return r.Exit }
+
 func cmdCollect(ctx context.Context, args []string) (any, error) {
-	if fetchMaxAge == 0 {
-		fetchMaxAge = 6 * time.Hour
-	}
+	// collectMaxAge defaults to 6h at flag registration; 0 means "run every
+	// stage regardless of freshness".
 
 	cfg, err := config.Load(configDir)
 	if err != nil {
@@ -50,73 +51,69 @@ func cmdCollect(ctx context.Context, args []string) (any, error) {
 	defer db.Close()
 
 	result := &collectResult{
-		Stages: make(map[string]stageOutput),
+		Stages:     make(map[string]stageOutput),
+		Candidates: []candidates.Candidate{},
 	}
 
 	var worstExit int
 
 	// --- Stage 1: fetch ---
-	fetchOut, fetchErr := collectRunFetch(ctx, db, cfg)
-	if fetchErr != nil {
-		result.Stages["fetch"] = stageOutput{Ran: true, Skipped: false, Result: exitErrorOrPlain(fetchErr)}
+	fetchOut, fetchExit, fetchErr := collectRunFetch(ctx, db, cfg)
+	switch {
+	case fetchErr != nil:
+		result.Stages["fetch"] = stageOutput{Ran: true, Result: exitErrorOrPlain(fetchErr)}
 		worstExit = exitCodeFromError(fetchErr)
-	} else if fetchOut != nil {
-		if fo, ok := fetchOut.(*fetchResult); ok {
-			result.Stages["fetch"] = stageOutput{Ran: true, Skipped: false, Result: fo}
-		} else {
-			result.Stages["fetch"] = stageOutput{Ran: true, Skipped: false, Result: fetchOut}
-		}
-	} else {
-		result.Stages["fetch"] = stageOutput{Ran: false, Skipped: true, Reason: "fresh"}
+	case fetchOut != nil:
+		result.Stages["fetch"] = stageOutput{Ran: true, Result: fetchOut}
+		worstExit = fetchExit
+	default:
+		result.Stages["fetch"] = stageOutput{Skipped: true, Reason: "fresh"}
 	}
 
 	if worstExit == 2 {
 		result.Exit = 2
-		result.Stages["dedupe"] = stageOutput{Ran: false, Skipped: true, Reason: "fetch_failed"}
-		result.Stages["candidates"] = stageOutput{Ran: false, Skipped: true, Reason: "fetch_failed"}
+		result.Stages["dedupe"] = stageOutput{Skipped: true, Reason: "fetch_failed"}
+		result.Stages["candidates"] = stageOutput{Skipped: true, Reason: "fetch_failed"}
 		return result, nil
 	}
 
 	// --- Stage 2: dedupe ---
 	dedupeOut, dedupeErr := runDedupe(ctx, db, cfg)
-	if dedupeErr != nil {
-		result.Stages["dedupe"] = stageOutput{Ran: true, Skipped: false, Result: exitErrorOrPlain(dedupeErr)}
+	switch {
+	case dedupeErr != nil:
+		result.Stages["dedupe"] = stageOutput{Ran: true, Result: exitErrorOrPlain(dedupeErr)}
 		worstExit = 2
-	} else if dedupeOut != nil {
-		if do, ok := dedupeOut.(*dedupe.AssignResult); ok {
-			result.Stages["dedupe"] = stageOutput{Ran: true, Skipped: false, Result: do}
-		} else {
-			result.Stages["dedupe"] = stageOutput{Ran: true, Skipped: false, Result: dedupeOut}
-		}
-	} else {
-		result.Stages["dedupe"] = stageOutput{Ran: false, Skipped: true, Reason: "fresh"}
+	case dedupeOut != nil:
+		result.Stages["dedupe"] = stageOutput{Ran: true, Result: dedupeOut}
+	default:
+		result.Stages["dedupe"] = stageOutput{Skipped: true, Reason: "fresh"}
 	}
 
 	if worstExit == 2 {
 		result.Exit = 2
-		result.Stages["candidates"] = stageOutput{Ran: false, Skipped: true, Reason: "dedupe_failed"}
+		result.Stages["candidates"] = stageOutput{Skipped: true, Reason: "dedupe_failed"}
 		return result, nil
 	}
 
 	// --- Stage 3: candidates ---
 	candidatesOut, candidatesErr := runCandidates(ctx, db, cfg)
-	if candidatesErr != nil {
-		result.Stages["candidates"] = stageOutput{Ran: true, Skipped: false, Result: exitErrorOrPlain(candidatesErr)}
+	switch {
+	case candidatesErr != nil:
+		result.Stages["candidates"] = stageOutput{Ran: true, Result: exitErrorOrPlain(candidatesErr)}
 		worstExit = 2
-	} else if candidatesOut != nil {
-		result.Stages["candidates"] = stageOutput{Ran: true, Skipped: false, Result: candidatesOut}
-		if co, ok := candidatesOut.(*candidates.Result); ok {
-			result.Candidates = co.Candidates
-		}
-	} else {
-		result.Stages["candidates"] = stageOutput{Ran: false, Skipped: true, Reason: "fresh"}
+	case candidatesOut != nil:
+		result.Stages["candidates"] = stageOutput{Ran: true, Result: candidatesOut}
+		result.Candidates = candidatesOut.Candidates
+	default:
+		result.Stages["candidates"] = stageOutput{Skipped: true, Reason: "fresh"}
 	}
 
 	result.Exit = worstExit
 
 	if !jsonOut {
 		fmt.Fprintf(stderr, "collect: exit=%d\n", result.Exit)
-		for name, s := range result.Stages {
+		for _, name := range []string{"fetch", "dedupe", "candidates"} {
+			s := result.Stages[name]
 			if s.Skipped {
 				fmt.Fprintf(stderr, "  %s: skipped (%s)\n", name, s.Reason)
 			} else if s.Ran {
@@ -134,9 +131,9 @@ func cmdCollect(ctx context.Context, args []string) (any, error) {
 func exitErrorOrPlain(err error) any {
 	var ee *ExitError
 	if errors.As(err, &ee) {
-		return ee
+		return buildEnvelope(ee.Slug, ee.Message, ee.Fields)
 	}
-	return err
+	return buildEnvelope("internal", err.Error(), nil)
 }
 
 func exitCodeFromError(err error) int {
@@ -147,33 +144,37 @@ func exitCodeFromError(err error) int {
 	return 2
 }
 
-// runFetch executes the fetch stage if gated. Returns (result, error).
-func collectRunFetch(ctx context.Context, db store.DB, cfg *config.Config) (any, error) {
+// collectRunFetch executes the fetch stage if gated. It returns the stage
+// result (nil when skipped), the stage exit code (0 ok, 1 partial, 2 all
+// sources failed) and an error only for failures before any source was tried.
+func collectRunFetch(ctx context.Context, db store.DB, cfg *config.Config) (*fetchResult, int, error) {
 	// Fetch is gated by age only.
-	if !collectStaleOrNoFetch(ctx, db, fetchMaxAge) {
-		return nil, nil
+	if !collectStaleOrNoFetch(ctx, db, collectMaxAge) {
+		return nil, 0, nil
 	}
 
 	f := &feed.Fetcher{
-		Client:      &http.Client{Timeout: 20 * time.Second},
-		UserAgent:   "newsops/" + Version + " (+personal feed reader)",
-		Limit:       10,
-		PerHost:     time.Second,
-		CacheDir:    "",
+		Client:    &http.Client{Timeout: 20 * time.Second},
+		UserAgent: "newsops/" + Version + " (+personal feed reader)",
+		Limit:     10,
+		PerHost:   time.Second,
+	}
+	if !fetchNoCache {
+		f.CacheDir = dbDir
 	}
 
 	var sinceFlag *time.Time
 	if fetchSince != "" {
 		t, err := time.Parse(time.RFC3339, fetchSince)
 		if err != nil {
-			return nil, &ExitError{Code: 2, Slug: "invalid_argument", Message: fmt.Sprintf("invalid --since value %q: %v", fetchSince, err)}
+			return nil, 2, &ExitError{Code: 2, Slug: "invalid_argument", Message: fmt.Sprintf("invalid --since value %q: %v", fetchSince, err)}
 		}
 		sinceFlag = &t
 	}
 
 	windowStart, backfilled, err := computeWindow(ctx, db, cfg.Prefilter.MaxBackfillDays, sinceFlag)
 	if err != nil {
-		return nil, fmt.Errorf("compute window: %w", err)
+		return nil, 2, fmt.Errorf("compute window: %w", err)
 	}
 
 	sources := cfg.Sources
@@ -185,14 +186,14 @@ func collectRunFetch(ctx context.Context, db store.DB, cfg *config.Config) (any,
 			}
 		}
 		if len(filtered) == 0 {
-			return nil, &ExitError{Code: 2, Slug: "invalid_argument", Message: fmt.Sprintf("source %q not found in config", fetchSource)}
+			return nil, 2, &ExitError{Code: 2, Slug: "invalid_argument", Message: fmt.Sprintf("source %q not found in config", fetchSource)}
 		}
 		sources = filtered
 	}
 
 	run, err := runstate.Begin(ctx, db, runstate.StageFetch)
 	if err != nil {
-		return nil, fmt.Errorf("begin fetch run: %w", err)
+		return nil, 2, fmt.Errorf("begin fetch run: %w", err)
 	}
 
 	repo := newFetchRepo(db)
@@ -200,11 +201,11 @@ func collectRunFetch(ctx context.Context, db store.DB, cfg *config.Config) (any,
 	results, err := f.Fetch(ctx, sources, state)
 	if err != nil {
 		run.End(ctx, false, runstate.Counts{}, "fetch error")
-		return nil, fmt.Errorf("fetch: %w", err)
+		return nil, 2, fmt.Errorf("fetch: %w", err)
 	}
 
 	var seen, newCount, droppedOld int
-	var failures []failureRecord
+	failures := []failureRecord{}
 	okSources, notModifiedCount := 0, 0
 
 	for _, r := range results {
@@ -238,81 +239,54 @@ func collectRunFetch(ctx context.Context, db store.DB, cfg *config.Config) (any,
 	totalSources := len(sources)
 	failedCount := totalSources - okSources
 
-	ok := true
-	c := runstate.Counts{In: seen, Out: newCount}
-	run.End(ctx, ok, c, "")
+	// A run in which every source failed is not a success: recording it as
+	// one would advance the fetch window past the outage.
+	ok := okSources > 0
+	note := ""
+	if !ok {
+		note = "all sources failed"
+	}
+	run.End(ctx, ok, runstate.Counts{In: seen, Out: newCount}, note)
 
 	var exitCode int
-	if failedCount == 0 {
+	switch {
+	case failedCount == 0:
 		exitCode = 0
-	} else if okSources > 0 {
+	case okSources > 0:
 		exitCode = 1
-	} else {
+	default:
 		exitCode = 2
 	}
 
-	fr := &fetchResult{
-		Window:   windowInfo{Since: windowStart.Format(time.RFC3339), Backfilled: backfilled},
+	return &fetchResult{
+		Window:   windowInfo{Since: windowStart.UTC().Format(time.RFC3339), Backfilled: backfilled},
 		Sources:  sourceCounts{Total: totalSources, OK: okSources, NotModified: notModifiedCount, Failed: failedCount},
 		Items:    itemCounts{Seen: seen, New: newCount, DroppedOld: droppedOld},
 		Failures: failures,
-	}
-
-	if exitCode != 0 {
-		return nil, &ExitError{Code: exitCode, Slug: "partial_fetch", Message: fmt.Sprintf("%d/%d sources failed", failedCount, totalSources), Fields: map[string]any{
-			"total":    totalSources,
-			"ok":       okSources,
-			"failed":   failedCount,
-			"sources":  fr.Sources,
-			"items":    fr.Items,
-			"failures": failures,
-		}}
-	}
-
-	return fr, nil
+	}, exitCode, nil
 }
 
-// runDedupe executes the dedupe stage if gated. Returns (result, error).
-func runDedupe(ctx context.Context, db store.DB, cfg *config.Config) (any, error) {
-	// Check if dedupe is fresh: fetch ran recently AND no unassigned items.
-	if !collectStaleOrNoFetch(ctx, db, fetchMaxAge) && !collectHasUnassignedItems(ctx, db) {
+// runDedupe executes the dedupe stage if gated. dedupe.Assign owns its own
+// run row and transaction, so nothing is wrapped here.
+func runDedupe(ctx context.Context, db store.TxDB, cfg *config.Config) (*dedupe.AssignResult, error) {
+	// Dedupe is fresh when fetch is fresh AND nothing is waiting for assignment.
+	if !collectStaleOrNoFetch(ctx, db, collectMaxAge) && !collectHasUnassignedItems(ctx, db) {
 		return nil, nil
 	}
 
-	run, err := runstate.Begin(ctx, db, runstate.StageDedupe)
-	if err != nil {
-		return nil, fmt.Errorf("begin dedupe run: %w", err)
-	}
-
-	var result *dedupe.AssignResult
-	txdb, ok := db.(store.TxDB)
-	if !ok {
-		return nil, fmt.Errorf("database does not support transactions")
-	}
-	err = txdb.Tx(ctx, func(tx *sql.Tx) error {
-		res, err := dedupe.Assign(ctx, txdb, cfg)
-		if err != nil {
-			return err
-		}
-		result = res
-		return nil
-	})
+	result, err := dedupe.Assign(ctx, db, cfg, dedupe.Options{})
 	if err != nil {
 		return nil, fmt.Errorf("dedupe: %w", err)
 	}
-
-	c := runstate.Counts{In: result.ItemsIn, Out: result.StoriesCreated + result.StoriesUpdated}
-	run.End(ctx, true, c, "")
-
 	return result, nil
 }
 
-// runCandidates executes the candidates stage if gated. Returns (result, error).
-func runCandidates(ctx context.Context, db store.DB, cfg *config.Config) (any, error) {
+// runCandidates executes the candidates stage if there is anything unshown
+// in the window.
+func runCandidates(ctx context.Context, db store.DB, cfg *config.Config) (*candidates.Result, error) {
 	sinceTime := collectComputeCandidatesSince(ctx, db, cfg.Prefilter.MaxBackfillDays)
 
-	hasUnshown := collectHasUnshownStories(ctx, db, sinceTime)
-	if !hasUnshown {
+	if !collectHasUnshownStories(ctx, db, sinceTime) {
 		return &candidates.Result{
 			GeneratedAt:   time.Now().UTC(),
 			Window:        candidates.WindowSummary{Since: sinceTime.Format(time.RFC3339), Days: int(time.Since(sinceTime).Hours() / 24)},
@@ -322,9 +296,8 @@ func runCandidates(ctx context.Context, db store.DB, cfg *config.Config) (any, e
 		}, nil
 	}
 
-	limit := candidatesLimit
-	if limit > 0 {
-		cfg.Prefilter.CandidateLimit = limit
+	if candidatesLimit > 0 {
+		cfg.Prefilter.CandidateLimit = candidatesLimit
 	}
 
 	result, err := candidates.Run(ctx, db, cfg, sinceTime, false)
@@ -332,54 +305,53 @@ func runCandidates(ctx context.Context, db store.DB, cfg *config.Config) (any, e
 		return nil, fmt.Errorf("candidates: %w", err)
 	}
 
-	run, err := runstate.Begin(ctx, db, runstate.StageCandidates)
-	if err != nil {
-		fmt.Fprintf(stderr, "newsops: begin candidates run: %v\n", err)
-	} else {
-		err = run.End(ctx, true, runstate.Counts{In: result.TotalInWindow, Out: result.Returned}, "")
-		if err != nil {
-			fmt.Fprintf(stderr, "newsops: end candidates run: %v\n", err)
-		}
-	}
-
+	recordCandidatesRun(ctx, db, result)
 	return result, nil
 }
 
-// StaleOrNoFetch reports whether fetch should run (stale or no prior success).
+// recordCandidatesRun writes the runs row for a candidates pass. Failures
+// are reported but do not fail the command.
+func recordCandidatesRun(ctx context.Context, db store.DB, result *candidates.Result) {
+	run, err := runstate.Begin(ctx, db, runstate.StageCandidates)
+	if err != nil {
+		fmt.Fprintf(stderr, "newsops: begin candidates run: %v\n", err)
+		return
+	}
+	if err := run.End(ctx, true, runstate.Counts{In: result.TotalInWindow, Out: result.Returned}, ""); err != nil {
+		fmt.Fprintf(stderr, "newsops: end candidates run: %v\n", err)
+	}
+}
+
+// collectStaleOrNoFetch reports whether fetch should run (stale or no prior success).
 func collectStaleOrNoFetch(ctx context.Context, db store.DB, maxAge time.Duration) bool {
 	t, found, err := runstate.LastSuccess(ctx, db, runstate.StageFetch)
-	if err != nil {
-		return true
-	}
-	if !found {
+	if err != nil || !found {
 		return true
 	}
 	return time.Since(t) > maxAge
 }
 
-// hasUnassignedItems reports whether any items have story_id IS NULL.
+// collectHasUnassignedItems reports whether any items have story_id IS NULL.
 func collectHasUnassignedItems(ctx context.Context, db store.DB) bool {
 	var count int
 	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM items WHERE story_id IS NULL`).Scan(&count)
 	return err == nil && count > 0
 }
 
-// hasUnshownStories reports whether any stories have shown_at IS NULL in the window.
+// collectHasUnshownStories reports whether any stories have shown_at IS NULL in the window.
 func collectHasUnshownStories(ctx context.Context, db store.DB, sinceTime time.Time) bool {
 	var count int
 	err := db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM stories WHERE shown_at IS NULL AND last_seen >= ?`,
-		sinceTime.Format(time.RFC3339)).Scan(&count)
+		store.FormatTime(sinceTime)).Scan(&count)
 	return err == nil && count > 0
 }
 
-// computeCandidatesSince determines the window start for candidates.
+// collectComputeCandidatesSince determines the window start for candidates:
+// the last successful fetch's start, or max_backfill_days ago.
 func collectComputeCandidatesSince(ctx context.Context, db store.DB, maxBackfillDays int) time.Time {
 	fetchLastTime, found, err := runstate.LastSuccess(ctx, db, runstate.StageFetch)
-	if err != nil {
-		return time.Now().UTC().Add(-time.Duration(maxBackfillDays) * 24 * time.Hour)
-	}
-	if found {
+	if err == nil && found {
 		return fetchLastTime
 	}
 	return time.Now().UTC().Add(-time.Duration(maxBackfillDays) * 24 * time.Hour)

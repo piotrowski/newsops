@@ -51,9 +51,8 @@ type Candidate struct {
 	Excerpt     string   `json:"excerpt"`
 }
 
-// Run produces a candidate list from the given database. It opens ReadOnly,
-// writes nothing (including no shown_at), and records a runstate row for stage
-// "candidates".
+// Run produces a candidate list from the given database. It writes nothing
+// (including no shown_at); the caller records the runstate row.
 func Run(ctx context.Context, db store.DB, cfg *config.Config, since time.Time, includeShown bool) (*Result, error) {
 	// Step 1: Load all stories in the window.
 	stories, err := loadStories(ctx, db, since, includeShown)

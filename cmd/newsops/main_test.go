@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -132,19 +135,10 @@ func TestExitError_Error(t *testing.T) {
 	}
 }
 
-func TestSplitCommand(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected []string
-	}{
-		{"status", []string{"status", ""}},
-		{"sources:check", []string{"sources", "check"}},
-		{"a:b:c", []string{"a", "b:c"}},
-	}
-	for _, tt := range tests {
-		got := splitCommand(tt.input)
-		if len(got) != len(tt.expected) || got[0] != tt.expected[0] || got[1] != tt.expected[1] {
-			t.Errorf("splitCommand(%q) = %v, want %v", tt.input, got, tt.expected)
+func TestCommandFlagsRegistered(t *testing.T) {
+	for name := range commandFlags {
+		if _, ok := commands[name]; !ok {
+			t.Errorf("flags registered for unknown command %q", name)
 		}
 	}
 }
@@ -263,7 +257,30 @@ func captureOutput(cmd *exec.Cmd) (stdout, stderr string, err error) {
 }
 
 // binPath returns the path to the newsops binary for integration tests.
-func binPath() string { return "../../newsops" }
+// binaryPath is the newsops binary built by TestMain. Integration tests used
+// to run ../../newsops, which silently tested whatever stale build happened
+// to be lying in the repo root.
+var binaryPath string
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "newsops-test-bin")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "tempdir:", err)
+		os.Exit(1)
+	}
+	binaryPath = filepath.Join(dir, "newsops")
+	build := exec.Command("go", "build", "-o", binaryPath, ".")
+	build.Stderr = os.Stderr
+	if err := build.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, "build test binary:", err)
+		os.Exit(1)
+	}
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+func binPath() string { return binaryPath }
 
 type assertError string
 

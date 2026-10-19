@@ -113,3 +113,18 @@ CREATE TRIGGER items_au AFTER UPDATE ON items BEGIN
         VALUES (new.id, new.title, new.body_excerpt);
 END;
 `
+
+// schemaV2 normalizes timestamps written by earlier builds in RFC3339 form
+// ("2026-09-22T17:36:27Z") to TimeLayout ("2026-09-22 17:36:27"), so that
+// comparisons against CURRENT_TIMESTAMP-written columns are chronological.
+const schemaV2 = `
+UPDATE items   SET published_at = strftime('%Y-%m-%d %H:%M:%S', published_at) WHERE published_at LIKE '%T%';
+UPDATE items   SET first_seen   = strftime('%Y-%m-%d %H:%M:%S', first_seen)   WHERE first_seen   LIKE '%T%';
+UPDATE stories SET first_seen   = strftime('%Y-%m-%d %H:%M:%S', first_seen)   WHERE first_seen   LIKE '%T%';
+UPDATE stories SET last_seen    = strftime('%Y-%m-%d %H:%M:%S', last_seen)    WHERE last_seen    LIKE '%T%';
+UPDATE stories SET shown_at     = strftime('%Y-%m-%d %H:%M:%S', shown_at)     WHERE shown_at     LIKE '%T%';
+UPDATE runs    SET started_at   = strftime('%Y-%m-%d %H:%M:%S', started_at)   WHERE started_at   LIKE '%T%';
+UPDATE runs    SET ended_at     = strftime('%Y-%m-%d %H:%M:%S', ended_at)     WHERE ended_at     LIKE '%T%';
+UPDATE decisions SET at         = strftime('%Y-%m-%d %H:%M:%S', at)           WHERE at           LIKE '%T%';
+UPDATE feed_state SET last_fetched = strftime('%Y-%m-%d %H:%M:%S', last_fetched) WHERE last_fetched LIKE '%T%';
+`

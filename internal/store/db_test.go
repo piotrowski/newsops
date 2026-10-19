@@ -36,8 +36,8 @@ func TestOpen_CreatesDirectoryAndDatabase(t *testing.T) {
 	// schema_version was recorded.
 	var version int
 	err = db.QueryRowContext(context.Background(), "SELECT MAX(version) FROM schema_version").Scan(&version)
-	if err != nil || version != 1 {
-		t.Fatalf("schema_version = %d, want 1 (err=%v)", version, err)
+	if want := migrations[len(migrations)-1].Version; err != nil || version != want {
+		t.Fatalf("schema_version = %d, want %d (err=%v)", version, want, err)
 	}
 }
 
@@ -94,8 +94,8 @@ func TestOpen_ReadOnlyUnderWriteLock(t *testing.T) {
 	// Verify we can read the schema_version table.
 	var version int
 	err = db.QueryRowContext(context.Background(), "SELECT MAX(version) FROM schema_version").Scan(&version)
-	if err != nil || version != 1 {
-		t.Fatalf("read schema_version under lock: version=%d, err=%v", version, err)
+	if want := migrations[len(migrations)-1].Version; err != nil || version != want {
+		t.Fatalf("read schema_version under lock: version=%d, want %d, err=%v", version, want, err)
 	}
 }
 

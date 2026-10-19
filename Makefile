@@ -3,7 +3,7 @@ COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 PREFIX  ?= $(HOME)/.local
 HARNESSES ?= .claude .opencode .cursor
 
-.PHONY: build install skills test check sources clean
+.PHONY: build install skills test e2e check sources clean
 
 build:
 	go build -ldflags "-X main.Version=$(VERSION) -X main.Commit=$(COMMIT)" -o newsops ./cmd/newsops
@@ -24,7 +24,12 @@ skills:
 test:
 	go test ./...
 
-check: build test skills
+# End-to-end: drives the built binary through every subcommand against local
+# fixture feeds (no network). See e2e/e2e_test.go.
+e2e: build
+	NEWSOPS_BIN=$(CURDIR)/newsops go test -tags e2e -count=1 ./e2e/
+
+check: build test e2e skills
 	@for f in $$(grep -o 'modes/[a-z_]*\.md' .agents/skills/news-ops/SKILL.md); do \
 		test -f "$$f" || { echo "missing: $$f"; exit 1; }; \
 	done
@@ -37,7 +42,7 @@ check: build test skills
 # Network reachability of the feed list. Separate from check: feeds rot
 # independently of the code, and a dead feed is not a build failure.
 sources: build
-	./newsops sources check --json
+	./newsops sources:check --json
 
 clean:
 	rm -f newsops

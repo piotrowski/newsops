@@ -180,7 +180,7 @@ func TestIntegration_sourcesCheckAllPass(t *testing.T) {
     url: "` + ts.URL + `/b"`
 	writeCheckConfig(t, configDir, sourcesYML)
 
-	cmd := exec.Command(binPath(), "sources", "check", "--db", dbDir, "--config", configDir, "--json")
+	cmd := exec.Command(binPath(), "sources:check", "--db", dbDir, "--config", configDir, "--json")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("sources:check: %v\n%s", err, string(out))
@@ -245,7 +245,7 @@ func TestIntegration_sourcesCheckFailures(t *testing.T) {
     url: "` + ts.URL + `/bad"`
 	writeCheckConfig(t, configDir, sourcesYML)
 
-	cmd := exec.Command(binPath(), "sources", "check", "--db", dbDir, "--config", configDir, "--json")
+	cmd := exec.Command(binPath(), "sources:check", "--db", dbDir, "--config", configDir, "--json")
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatal("expected non-zero exit for failures")
@@ -310,7 +310,7 @@ func TestIntegration_sourcesCheckNoFilesystemWrites(t *testing.T) {
 		t.Fatal("data/ directory should not exist before check")
 	}
 
-	cmd := exec.Command(binPath(), "sources", "check", "--db", dataDir, "--config", configDir, "--json")
+	cmd := exec.Command(binPath(), "sources:check", "--db", dataDir, "--config", configDir, "--json")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("sources:check: %v\n%s", err, string(out))
@@ -356,7 +356,7 @@ func TestIntegration_sourcesCheckSingleSource(t *testing.T) {
     url: "` + ts.URL + `/beta"`
 	writeCheckConfig(t, configDir, sourcesYML)
 
-	cmd := exec.Command(binPath(), "sources", "check", "--db", dbDir, "--config", configDir, "--source", "Alpha", "--json")
+	cmd := exec.Command(binPath(), "sources:check", "--db", dbDir, "--config", configDir, "--source", "Alpha", "--json")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("sources:check --source Alpha: %v\n%s", err, string(out))
@@ -391,7 +391,7 @@ func TestIntegration_sourcesCheckInvalidSource(t *testing.T) {
     url: "http://localhost:0/alpha"`
 	writeCheckConfig(t, configDir, sourcesYML)
 
-	cmd := exec.Command(binPath(), "sources", "check", "--config", configDir, "--source", "NonExistent", "--json")
+	cmd := exec.Command(binPath(), "sources:check", "--config", configDir, "--source", "NonExistent", "--json")
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatal("expected non-zero exit for invalid source")
@@ -442,7 +442,7 @@ func TestIntegration_sourcesCheckConcurrency(t *testing.T) {
 	writeCheckConfig(t, configDir, sourcesYML.String())
 
 	start := time.Now()
-	cmd := exec.Command(binPath(), "sources", "check", "--config", configDir, "--json")
+	cmd := exec.Command(binPath(), "sources:check", "--config", configDir, "--json")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("sources:check: %v\n%s", err, string(out))
@@ -490,7 +490,7 @@ func TestIntegration_sourcesCheckUserAgent(t *testing.T) {
     url: "` + ts.URL + `/feed"`
 	writeCheckConfig(t, configDir, sourcesYML)
 
-	cmd := exec.Command(binPath(), "sources", "check", "--config", configDir, "--json")
+	cmd := exec.Command(binPath(), "sources:check", "--config", configDir, "--json")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("sources:check: %v\n%s", err, string(out))
@@ -548,7 +548,7 @@ func TestIntegration_sourcesCheckHumanOutput(t *testing.T) {
     url: "` + ts.URL + `/html"`
 	writeCheckConfig(t, configDir, sourcesYML)
 
-	cmd := exec.Command(binPath(), "sources", "check", "--config", configDir)
+	cmd := exec.Command(binPath(), "sources:check", "--config", configDir)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatal("expected non-zero exit for failures")

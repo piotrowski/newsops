@@ -18,7 +18,9 @@ func cmdCandidates(ctx context.Context, args []string) (any, error) {
 		return &ExitError{Code: 2, Slug: "config_error", Message: fmt.Sprintf("load config: %v", err)}, nil
 	}
 
-	db, err := store.Open(ctx, dbDir, store.ReadOnly)
+	// candidates writes a runs row (status reports the stage's freshness),
+	// so it takes the write lock like every other writer.
+	db, err := store.Open(ctx, dbDir, store.ReadWrite)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -56,16 +58,7 @@ func cmdCandidates(ctx context.Context, args []string) (any, error) {
 		return nil, fmt.Errorf("candidates: %w", err)
 	}
 
-	// Record runstate.
-	run, err := runstate.Begin(ctx, db, runstate.StageCandidates)
-	if err != nil {
-		fmt.Fprintf(stderr, "newsops: begin candidates run: %v\n", err)
-	} else {
-		err = run.End(ctx, true, runstate.Counts{In: result.TotalInWindow, Out: result.Returned}, "")
-		if err != nil {
-			fmt.Fprintf(stderr, "newsops: end candidates run: %v\n", err)
-		}
-	}
+	recordCandidatesRun(ctx, db, result)
 
 	if !jsonOut {
 		fmt.Fprintf(stderr, "candidates: %d in window → %d returned (%d shown dropped, %d excluded, %d source-capped)\n",

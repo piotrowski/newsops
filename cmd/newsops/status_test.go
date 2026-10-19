@@ -60,7 +60,7 @@ func TestStatus_JsonOutput(t *testing.T) {
 
 	// Record a successful fetch run 2 hours ago.
 	twoHoursAgo := time.Now().Add(-2 * time.Hour).UTC()
-	fetchStarted := twoHoursAgo.Format(time.RFC3339)
+	fetchStarted := store.FormatTime(twoHoursAgo)
 	_, err = sqlDB.ExecContext(ctx,
 		`INSERT INTO runs(stage, started_at, ended_at, ok, items_in, items_out, note)
 		 VALUES ('fetch', ?, ?, 1, 100, 80, '')`,
@@ -71,7 +71,7 @@ func TestStatus_JsonOutput(t *testing.T) {
 
 	// Record a successful dedupe run 1 hour ago.
 	oneHourAgo := time.Now().Add(-1 * time.Hour).UTC()
-	dedupeStarted := oneHourAgo.Format(time.RFC3339)
+	dedupeStarted := store.FormatTime(oneHourAgo)
 	_, err = sqlDB.ExecContext(ctx,
 		`INSERT INTO runs(stage, started_at, ended_at, ok, items_in, items_out, note)
 		 VALUES ('dedupe', ?, ?, 1, 80, 60, '')`,
@@ -81,7 +81,7 @@ func TestStatus_JsonOutput(t *testing.T) {
 	}
 
 	// Insert items.
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := store.FormatTime(time.Now().UTC())
 	for i := 0; i < 10; i++ {
 		url := "https://example.com/article" + string(rune('a'+i))
 		title := "Test article " + string(rune('a'+i))
@@ -98,7 +98,7 @@ func TestStatus_JsonOutput(t *testing.T) {
 	// Insert stories — some shown, some not.
 	for i := 0; i < 5; i++ {
 		itemID := int64(i + 1)
-		nowRFC := time.Now().UTC().Format(time.RFC3339)
+		nowRFC := store.FormatTime(time.Now().UTC())
 		_, err = sqlDB.ExecContext(ctx,
 			`INSERT INTO stories(canonical_item_id, source_count, method, first_seen, last_seen, shown_at)
 			 VALUES (?, 1, 'url', ?, ?, NULL)`,
@@ -229,7 +229,7 @@ func TestStatus_StaleBoundary(t *testing.T) {
 
 	// Record a fetch run 7 hours ago.
 	sevenHoursAgo := time.Now().Add(-7 * time.Hour).UTC()
-	started := sevenHoursAgo.Format(time.RFC3339)
+	started := store.FormatTime(sevenHoursAgo)
 	_, err = sqlDB.ExecContext(ctx,
 		`INSERT INTO runs(stage, started_at, ended_at, ok, items_in, items_out)
 		 VALUES ('fetch', ?, ?, 1, 10, 8)`,
@@ -287,7 +287,7 @@ func TestStatus_AgeMin(t *testing.T) {
 	ctx := context.Background()
 
 	// Record a fetch run.
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := store.FormatTime(time.Now().UTC())
 	_, err = sqlDB.ExecContext(ctx,
 		`INSERT INTO runs(stage, started_at, ended_at, ok, items_in, items_out)
 		 VALUES ('fetch', ?, ?, 1, 10, 8)`,
@@ -328,7 +328,7 @@ func TestStatus_ConcurrentRead(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := store.FormatTime(time.Now().UTC())
 	_, err = sqlDB.ExecContext(ctx,
 		`INSERT INTO runs(stage, started_at, ended_at, ok, items_in, items_out)
 		 VALUES ('fetch', ?, ?, 1, 10, 8)`,
@@ -374,8 +374,8 @@ func TestStatus_UnshownStories(t *testing.T) {
 
 	ctx := context.Background()
 	now := time.Now().UTC()
-	nowRFC := now.Format(time.RFC3339)
-	fetchTime := now.Add(-1 * time.Hour).Format(time.RFC3339)
+	nowRFC := store.FormatTime(now)
+	fetchTime := store.FormatTime(now.Add(-1 * time.Hour))
 
 	// Record a fetch run.
 	_, err = sqlDB.ExecContext(ctx,
@@ -462,9 +462,9 @@ func TestStatus_NewSinceFetch(t *testing.T) {
 
 	ctx := context.Background()
 	now := time.Now().UTC()
-	fetchTime := now.Add(-2 * time.Hour).Format(time.RFC3339)
-	oldTime := now.Add(-4 * time.Hour).Format(time.RFC3339)
-	nowRFC := now.Format(time.RFC3339)
+	fetchTime := store.FormatTime(now.Add(-2 * time.Hour))
+	oldTime := store.FormatTime(now.Add(-4 * time.Hour))
+	nowRFC := store.FormatTime(now)
 
 	// Record a fetch run.
 	_, err = sqlDB.ExecContext(ctx,
@@ -526,7 +526,7 @@ func TestStatus_Perf(t *testing.T) {
 	defer sqlDB.Close()
 
 	ctx := context.Background()
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := store.FormatTime(time.Now().UTC())
 
 	// Insert 10k items.
 	for i := 0; i < 10000; i++ {
@@ -571,7 +571,7 @@ func TestStatus_DigestFile(t *testing.T) {
 	defer sqlDB.Close()
 
 	ctx := context.Background()
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := store.FormatTime(time.Now().UTC())
 	_, err = sqlDB.ExecContext(ctx,
 		`INSERT INTO runs(stage, started_at, ended_at, ok, items_in, items_out)
 		 VALUES ('fetch', ?, ?, 1, 10, 8)`,
@@ -584,7 +584,8 @@ func TestStatus_DigestFile(t *testing.T) {
 	fetchMaxAge = 6 * time.Hour
 
 	// No digest.md — should be null.
-	configDir = ""
+	digestPath = filepath.Join(dir, "digest.md")
+	defer func() { digestPath = "digest.md" }()
 	result, err := cmdStatus(ctx, nil)
 	if err != nil {
 		t.Fatalf("status: %v", err)
@@ -629,6 +630,7 @@ func TestStatus_NeverRunShape(t *testing.T) {
 	dbDir = dir
 	fetchMaxAge = 6 * time.Hour
 	configDir = ""
+	digestPath = "digest.md"
 
 	result, err := cmdStatus(ctx, nil)
 	if err != nil {

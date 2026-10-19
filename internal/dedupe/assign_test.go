@@ -185,7 +185,7 @@ func TestAssign_HNPlusArticle(t *testing.T) {
 	db := seedTestDB(t, items)
 	defer db.Close()
 
-	result, err := Assign(ctx, db, cfg)
+	result, err := Assign(ctx, db, cfg, Options{})
 	if err != nil {
 		t.Fatalf("Assign: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestAssign_TitleMatchWithin48h(t *testing.T) {
 	db := seedTestDB(t, items)
 	defer db.Close()
 
-	result, err := Assign(ctx, db, cfg)
+	result, err := Assign(ctx, db, cfg, Options{})
 	if err != nil {
 		t.Fatalf("Assign: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestAssign_TitleMatchOutside48h(t *testing.T) {
 	db := seedTestDB(t, items)
 	defer db.Close()
 
-	result, err := Assign(ctx, db, cfg)
+	result, err := Assign(ctx, db, cfg, Options{})
 	if err != nil {
 		t.Fatalf("Assign: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestAssign_Idempotent(t *testing.T) {
 	db := seedTestDB(t, items)
 	defer db.Close()
 
-	result1, err := Assign(ctx, db, cfg)
+	result1, err := Assign(ctx, db, cfg, Options{})
 	if err != nil {
 		t.Fatalf("first Assign: %v", err)
 	}
@@ -368,7 +368,7 @@ func TestAssign_Idempotent(t *testing.T) {
 		t.Errorf("first: items_in = %d, want 1", result1.ItemsIn)
 	}
 
-	result2, err := Assign(ctx, db, cfg)
+	result2, err := Assign(ctx, db, cfg, Options{})
 	if err != nil {
 		t.Fatalf("second Assign: %v", err)
 	}
@@ -430,7 +430,7 @@ func TestAssign_ThirdItemIncreasesSourceCount(t *testing.T) {
 	db := seedTestDB(t, items)
 	defer db.Close()
 
-	result1, err := Assign(ctx, db, cfg)
+	result1, err := Assign(ctx, db, cfg, Options{})
 	if err != nil {
 		t.Fatalf("first Assign: %v", err)
 	}
@@ -455,7 +455,7 @@ func TestAssign_ThirdItemIncreasesSourceCount(t *testing.T) {
 		t.Fatalf("insert third item: %v", err)
 	}
 
-	result2, err := Assign(ctx, db, cfg)
+	result2, err := Assign(ctx, db, cfg, Options{})
 	if err != nil {
 		t.Fatalf("second Assign: %v", err)
 	}
@@ -521,7 +521,7 @@ func TestAssign_CanonicalItemPrefersEarliest(t *testing.T) {
 	db := seedTestDB(t, items)
 	defer db.Close()
 
-	_, err := Assign(ctx, db, cfg)
+	_, err := Assign(ctx, db, cfg, Options{})
 	if err != nil {
 		t.Fatalf("Assign: %v", err)
 	}
@@ -579,7 +579,7 @@ func TestAssign_SameSourceCountsOnce(t *testing.T) {
 	db := seedTestDB(t, items)
 	defer db.Close()
 
-	_, err := Assign(ctx, db, cfg)
+	_, err := Assign(ctx, db, cfg, Options{})
 	if err != nil {
 		t.Fatalf("Assign: %v", err)
 	}
@@ -632,7 +632,7 @@ func TestAssign_StoryIDsStable(t *testing.T) {
 	db := seedTestDB(t, items)
 	defer db.Close()
 
-	_, err := Assign(ctx, db, cfg)
+	_, err := Assign(ctx, db, cfg, Options{})
 	if err != nil {
 		t.Fatalf("first Assign: %v", err)
 	}
@@ -686,7 +686,7 @@ func TestAssign_StoryIDsStable(t *testing.T) {
 		}
 	}
 
-	result2, err := Assign(ctx, db, cfg)
+	result2, err := Assign(ctx, db, cfg, Options{})
 	if err != nil {
 		t.Fatalf("second Assign: %v", err)
 	}

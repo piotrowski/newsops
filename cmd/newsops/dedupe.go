@@ -28,7 +28,7 @@ func cmdDedupe(ctx context.Context, args []string) (any, error) {
 	}
 	defer db.Close()
 
-	result, err := dedupe.Assign(ctx, db, cfg)
+	result, err := dedupe.Assign(ctx, db, cfg, dedupe.Options{Window: dedupeWindow, Limit: dedupeLimit})
 	if err != nil {
 		return nil, err
 	}

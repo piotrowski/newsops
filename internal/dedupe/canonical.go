@@ -164,25 +164,70 @@ type Link struct {
 	Kind string // "article" | "discussion"
 }
 
-// knownAggregators lists source names that map article/discussion links.
-var knownAggregators = map[string]bool{
-	"Hacker News":      true,
-	"Lobsters":         true,
-	"r/programming":    true,
-	"r/MachineLearning": true,
-	"Techmeme":         true,
+// Aggregator kinds recognised by ResolveAggregator.
+const (
+	aggNone     = ""
+	aggHN       = "hn"
+	aggLobsters = "lobsters"
+	aggReddit   = "reddit"
+	aggTechmeme = "techmeme"
+)
+
+// knownAggregators maps legacy display names to an aggregator kind. Detection
+// by feed host (aggregatorKind) is preferred because configured source names
+// are free-form ("hacker-news-digest", "techmeme").
+var knownAggregators = map[string]string{
+	"Hacker News":       aggHN,
+	"Lobsters":          aggLobsters,
+	"r/programming":     aggReddit,
+	"r/MachineLearning": aggReddit,
+	"Techmeme":          aggTechmeme,
+}
+
+// aggregatorHosts maps a feed host (or a parent domain of it) to a kind.
+var aggregatorHosts = map[string]string{
+	"news.ycombinator.com": aggHN,
+	"hnrss.org":            aggHN,
+	"lobste.rs":            aggLobsters,
+	"reddit.com":           aggReddit,
+	"techmeme.com":         aggTechmeme,
+}
+
+// aggregatorKind classifies a source by its feed URL host, then by its
+// (free-form) configured name.
+func aggregatorKind(src Source) string {
+	if u, err := url.Parse(src.URL); err == nil {
+		host := strings.ToLower(u.Hostname())
+		for h, kind := range aggregatorHosts {
+			if isSubdomainOrSame(host, h) {
+				return kind
+			}
+		}
+	}
+	if kind, ok := knownAggregators[src.Name]; ok {
+		return kind
+	}
+	name := strings.ToLower(src.Name)
+	switch {
+	case strings.Contains(name, "hacker news"), strings.Contains(name, "hacker-news"),
+		strings.Contains(name, "hackernews"), strings.Contains(name, "hnrss"):
+		return aggHN
+	case strings.Contains(name, "lobste"):
+		return aggLobsters
+	case strings.Contains(name, "reddit"), strings.HasPrefix(name, "r/"):
+		return aggReddit
+	case strings.Contains(name, "techmeme"):
+		return aggTechmeme
+	}
+	return aggNone
 }
 
 // ResolveAggregator returns the article link and, when the source is a known
 // aggregator, the discussion link. For a non-aggregator, discussion is nil
 // and article is the item's own link.
 func ResolveAggregator(p ParsedItem, src Source) (article Link, discussion *Link) {
-	if !knownAggregators[src.Name] {
-		return Link{URL: p.Link, Kind: "article"}, nil
-	}
-
-	switch src.Name {
-	case "Hacker News", "Lobsters":
+	switch aggregatorKind(src) {
+	case aggHN, aggLobsters:
 		// Article is the item link (the original URL embedded in the feed),
 		// discussion is the comments thread.
 		if p.CommentsURL != "" {
@@ -190,7 +235,7 @@ func ResolveAggregator(p ParsedItem, src Source) (article Link, discussion *Link
 		}
 		return Link{URL: p.Link, Kind: "article"}, nil
 
-	case "r/programming", "r/MachineLearning":
+	case aggReddit:
 		// Reddit: try to find the first outbound link in content whose host
 		// differs from reddit.com. If found, that's the article; the item
 		// link is the discussion thread.
@@ -201,7 +246,7 @@ func ResolveAggregator(p ParsedItem, src Source) (article Link, discussion *Link
 		// Self-post or no outbound link: treat as a normal item.
 		return Link{URL: p.Link, Kind: "article"}, nil
 
-	case "Techmeme":
+	case aggTechmeme:
 		// Techmeme already carries the source article URL in p.Link.
 		return Link{URL: p.Link, Kind: "article"}, nil
 

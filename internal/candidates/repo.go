@@ -19,11 +19,11 @@ func loadStories(ctx context.Context, db store.DB, sinceTime time.Time, includeS
 	FROM stories s
 	JOIN items i ON i.id = s.canonical_item_id
 	WHERE s.last_seen >= ?`)
-	args := []any{sinceTime.Format(time.RFC3339)}
+	args := []any{store.FormatTime(sinceTime)}
 
-	if !includeShown {
-		where.WriteString(" AND s.shown_at IS NULL")
-	}
+	// Shown stories are loaded too and dropped by the caller, so that
+	// Result.Dropped.Shown reports how many the window actually held.
+	_ = includeShown
 
 	where.WriteString(` ORDER BY s.id`)
 

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"news-ops/internal/feed"
 	"news-ops/internal/store"
@@ -47,15 +46,19 @@ func (r *sqliteFetchRepo) PutFeedState(ctx context.Context, source, url, etag, l
 func (r *sqliteFetchRepo) InsertItem(ctx context.Context, item feed.ParsedItem, sourceName string, tier int, rawPath string) (bool, error) {
 	var publishedAt interface{}
 	if item.Published != nil {
-		publishedAt = item.Published.Format(time.RFC3339)
+		publishedAt = store.FormatTime(*item.Published)
+	}
+	var commentsURL interface{}
+	if item.CommentsURL != "" {
+		commentsURL = item.CommentsURL
 	}
 
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO items(url, canonical_url, title, source, tier, published_at, first_seen, body_hash, body_excerpt, raw_path, story_id)
-		 VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, NULL)
+		`INSERT INTO items(url, canonical_url, title, source, tier, published_at, first_seen, body_hash, body_excerpt, raw_path, comments_url, story_id)
+		 VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, NULL)
 		 ON CONFLICT(url) DO NOTHING`,
 		item.Link, item.Link, item.Title, sourceName, tier, publishedAt,
-		feed.BodyHash(item), feed.Excerpt(item), rawPath,
+		feed.BodyHash(item), feed.Excerpt(item), rawPath, commentsURL,
 	)
 	if err != nil {
 		return false, fmt.Errorf("insert item: %w", err)

@@ -29,9 +29,20 @@ func cmdDecide(ctx context.Context, args []string) (any, error) {
 		return &ExitError{Code: 2, Slug: "invalid_argument", Message: "usage: newsops decide <story_ids> <action> [--note \"...\"]"}, nil
 	}
 
-	// Last arg is the action; everything before that is story IDs.
+	// Last arg is the action; everything before that is story IDs, given
+	// either space-separated or as one comma-separated list.
 	action := args[len(args)-1]
-	idStrings := args[:len(args)-1]
+	var idStrings []string
+	for _, a := range args[:len(args)-1] {
+		for _, part := range strings.Split(a, ",") {
+			if part = strings.TrimSpace(part); part != "" {
+				idStrings = append(idStrings, part)
+			}
+		}
+	}
+	if len(idStrings) == 0 {
+		return &ExitError{Code: 2, Slug: "invalid_argument", Message: "usage: newsops decide <story_ids> <action> [--note \"...\"]"}, nil
+	}
 
 	if !isValidAction(action) {
 		return &ExitError{Code: 2, Slug: "invalid_argument", Message: fmt.Sprintf("invalid action %q — valid actions: %s", action, strings.Join(validActions, ", "))}, nil

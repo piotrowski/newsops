@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"news-ops/internal/config"
 	"news-ops/internal/dedupe"
@@ -13,12 +15,12 @@ import (
 
 // queryFlags hold the subcommand-specific flags.
 var (
-	queryText     string
-	queryDomain   string
-	queryStoryID  int64
-	queryRelated  bool
-	queryDays     int
-	queryLimit    int
+	queryText    string
+	queryDomain  string
+	queryStoryID int64
+	queryRelated bool
+	queryDays    int
+	queryLimit   int
 )
 
 // queryResult is the JSON output from the query subcommand.
@@ -102,53 +104,93 @@ func cmdQuery(ctx context.Context, args []string) (any, error) {
 		textQuery = buildRelatedQuery(normalized, canonicalItem.Host)
 	}
 
-	// Build the SQL query.
-	var sql strings.Builder
-	sql.WriteString(`SELECT DISTINCT s.id, i.title, i.url, i.source, i.published_at,
-		s.first_seen, s.source_count,
-		snippet(items_fts, '...', '<b>', '</b>', '...', 30) AS snippet
-	FROM stories s
-	JOIN items i ON i.id = s.canonical_item_id
-	WHERE s.last_seen >= datetime('now', ?)`)
+	// Build the SQL query. With a text query the match runs over every member
+	// item of a story (not only the canonical one); FTS5 auxiliary functions
+	// cannot be combined with GROUP BY, so rows come back per matching item
+	// ordered by rank and are collapsed to one per story here. Without text
+	// there is no FTS table in play and the limit is applied in SQL.
+	var (
+		querySQL string
+		countSQL string
+		qargs    []any
+	)
+	sinceArg := store.FormatTime(time.Now().UTC().AddDate(0, 0, -queryDays))
 
-	var queryArgs []any
-	queryArgs = append(queryArgs, fmt.Sprintf("-%d days", queryDays))
+	domainSQL := ""
+	var domainArgs []any
+	if hasDomain {
+		// Match the source name or the URL host (with or without www.).
+		domain := strings.ToLower(strings.TrimPrefix(queryDomain, "www."))
+		domainSQL = ` AND (LOWER(i.source) = ?
+			OR LOWER(i.url) LIKE '%://' || ? || '/%'
+			OR LOWER(i.url) LIKE '%://www.' || ? || '/%'
+			OR LOWER(i.url) LIKE '%.' || ? || '/%'
+			OR LOWER(i.url) = 'https://' || ? OR LOWER(i.url) = 'http://' || ?)`
+		domainArgs = []any{domain, domain, domain, domain, domain, domain}
+	}
+
+	const cols = `s.id, i.title, i.url, i.source, i.published_at, s.first_seen, s.source_count`
 
 	if textQuery != "" {
-		sql.WriteString(" AND items_fts MATCH ?")
-		queryArgs = append(queryArgs, textQuery)
+		querySQL = `SELECT ` + cols + `, snippet(items_fts, -1, '<b>', '</b>', '...', 30)
+			FROM items_fts
+			JOIN items m ON m.id = items_fts.rowid
+			JOIN stories s ON s.id = m.story_id
+			JOIN items i ON i.id = s.canonical_item_id
+			WHERE items_fts MATCH ? AND s.last_seen >= ?` + domainSQL + `
+			ORDER BY items_fts.rank, s.last_seen DESC`
+		qargs = append([]any{textQuery, sinceArg}, domainArgs...)
+	} else {
+		querySQL = `SELECT ` + cols + `, ''
+			FROM stories s
+			JOIN items i ON i.id = s.canonical_item_id
+			WHERE s.last_seen >= ?` + domainSQL + `
+			ORDER BY s.last_seen DESC, s.id LIMIT ?`
+		countSQL = `SELECT COUNT(*) FROM stories s JOIN items i ON i.id = s.canonical_item_id
+			WHERE s.last_seen >= ?` + domainSQL
+		qargs = append([]any{sinceArg}, domainArgs...)
 	}
 
-	if hasDomain {
-		domain := strings.ToLower(queryDomain)
-		sql.WriteString(` AND (LOWER(i.source) LIKE ? OR LOWER(i.url) LIKE ?)`)
-		queryArgs = append(queryArgs, domain+"%", "%."+domain)
+	runArgs := qargs
+	if textQuery == "" {
+		runArgs = append(append([]any{}, qargs...), queryLimit)
 	}
-
-	sql.WriteString(` ORDER BY rank LIMIT ?`)
-	queryArgs = append(queryArgs, queryLimit)
-
-	rows, err := db.QueryContext(ctx, sql.String(), queryArgs...)
+	rows, err := db.QueryContext(ctx, querySQL, runArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
 	}
 	defer rows.Close()
 
-	var results []QueryItem
+	results := []QueryItem{}
+	seen := make(map[int64]bool)
+	total := 0
 	for rows.Next() {
 		var item QueryItem
+		var published, firstSeen sql.NullString
 		if err := rows.Scan(&item.StoryID, &item.Title, &item.URL, &item.Source,
-			&item.PublishedAt, &item.FirstSeen, &item.SourceCount, &item.Snippet); err != nil {
+			&published, &firstSeen, &item.SourceCount, &item.Snippet); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
+		if seen[item.StoryID] {
+			continue // a lower-ranked item of a story already listed
+		}
+		seen[item.StoryID] = true
+		total++
+		if len(results) >= queryLimit {
+			continue // keep counting for total, stop collecting
+		}
+		item.PublishedAt = published.String
+		item.FirstSeen = firstSeen.String
 		results = append(results, item)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate: %w", err)
+	}
 
-	var total int
-	err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM stories WHERE last_seen >= datetime('now', ?)`,
-		fmt.Sprintf("-%d days", queryDays)).Scan(&total)
-	if err != nil {
-		total = len(results) // fallback
+	if countSQL != "" {
+		if err := db.QueryRowContext(ctx, countSQL, qargs...).Scan(&total); err != nil {
+			return nil, fmt.Errorf("count: %w", err)
+		}
 	}
 
 	qp := QueryParams{Days: queryDays, Limit: queryLimit}

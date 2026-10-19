@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"news-ops/internal/config"
+	"news-ops/internal/store"
 )
 type Repo interface {
 	CountUnassigned(ctx context.Context) (int, error)
@@ -100,10 +101,16 @@ func (r *sqliteRepo) LoadStoryMap(ctx context.Context) (storyMap, error) {
 }
 
 func (r *sqliteRepo) CreateStory(ctx context.Context, item itemRow, canonicalURL string) (int64, error) {
+	// item.FirstSeen was scanned through time.Time and so is RFC3339; write
+	// it back in the one on-disk format.
+	firstSeen := item.FirstSeen
+	if t, err := store.ParseTime(item.FirstSeen); err == nil {
+		firstSeen = store.FormatTime(t)
+	}
 	res, err := r.tx.ExecContext(ctx,
 		`INSERT INTO stories(canonical_item_id, source_count, method, first_seen, last_seen)
 		 VALUES (?, 1, 'url', ?, ?)`,
-		item.ID, item.FirstSeen, item.FirstSeen)
+		item.ID, firstSeen, firstSeen)
 	if err != nil {
 		return 0, fmt.Errorf("insert story: %w", err)
 	}

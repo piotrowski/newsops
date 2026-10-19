@@ -85,14 +85,14 @@ func TestMigrate_CreatesAllTables(t *testing.T) {
 		}
 	}
 
-	// Verify schema_version = 1.
+	// Verify schema_version = latest migration.
 	var version int
-	err := db.QueryRowContext(ctx, "SELECT version FROM schema_version").Scan(&version)
+	err := db.QueryRowContext(ctx, "SELECT MAX(version) FROM schema_version").Scan(&version)
 	if err != nil {
 		t.Fatalf("read schema_version: %v", err)
 	}
-	if version != 1 {
-		t.Errorf("schema_version = %d, want 1", version)
+	if want := migrations[len(migrations)-1].Version; version != want {
+		t.Errorf("schema_version = %d, want %d", version, want)
 	}
 }
 
@@ -114,8 +114,8 @@ func TestMigrate_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read schema_version count: %v", err)
 	}
-	if count != 1 {
-		t.Errorf("schema_version has %d rows, want 1 (idempotent)", count)
+	if count != len(migrations) {
+		t.Errorf("schema_version has %d rows, want %d (idempotent)", count, len(migrations))
 	}
 }
 func TestMigrate_FailedMigrationRollsBack(t *testing.T) {
@@ -148,8 +148,8 @@ func TestMigrate_FailedMigrationRollsBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read schema_version: %v", err)
 	}
-	if version != 1 {
-		t.Errorf("schema_version = %d, want 1 (rollback should preserve state)", version)
+	if want := migrations[len(migrations)-1].Version; version != want {
+		t.Errorf("schema_version = %d, want %d (rollback should preserve state)", version, want)
 	}
 }
 

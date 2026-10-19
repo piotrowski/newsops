@@ -26,9 +26,15 @@ func minimalRSS(title, link, description string) string {
   <channel><title>T</title><link>https://example.com</link>
     <item><title>%s</title><link>%s</link>
       <description>%s</description>
-      <pubDate>Tue, 01 Sep 2026 12:00:00 GMT</pubDate>
+      <pubDate>%s</pubDate>
       <guid isPermaLink="true">%s</guid>
-    </item></channel></rss>`, title, link, description, link)
+    </item></channel></rss>`, title, link, description, recentPubDate(), link)
+}
+
+// recentPubDate returns an RFC1123 date one day ago, so fixtures always fall
+// inside the backfill window no matter when the tests run.
+func recentPubDate() string {
+	return time.Now().UTC().AddDate(0, 0, -1).Format(time.RFC1123)
 }
 
 // minimalRSSNoDate returns RSS with an item that has no pubDate.

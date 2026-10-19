@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,10 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+
+// ErrNoDatabase is returned by a ReadOnly Open when the database file does
+// not exist yet.
+var ErrNoDatabase = errors.New("database not found; run `newsops fetch` or `newsops collect` first")
 
 // Mode controls whether Open takes a write lock.
 type Mode int
@@ -40,11 +45,21 @@ type SQLiteDB struct {
 // Open creates dir if needed, opens data/news.db, applies pragmas, runs
 // Migrate, and for ReadWrite takes the lock.
 func Open(ctx context.Context, dir string, mode Mode) (*SQLiteDB, error) {
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	dbPath := dbPath(dir)
+
+	if mode == ReadOnly {
+		// A read-only open never creates a database: a missing file is an
+		// error, not an empty archive.
+		if _, err := os.Stat(dbPath); err != nil {
+			if os.IsNotExist(err) {
+				return nil, ErrNoDatabase
+			}
+			return nil, fmt.Errorf("stat database: %w", err)
+		}
+	} else if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("create data directory: %w", err)
 	}
 
-	dbPath := dbPath(dir)
 	sqlDB, err := sql.Open("sqlite", fmt.Sprintf("file:%s?_journal_mode=WAL&_foreign_keys=ON&_busy_timeout=5000&_synchronous=NORMAL", dbPath))
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
